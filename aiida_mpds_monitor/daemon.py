@@ -192,6 +192,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 hierarchy,
                 parent_label,
                 no_commit=no_commit,
+                force=force,
             )
             if result is False:
                 any_failed = True
