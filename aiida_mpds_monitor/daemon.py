@@ -163,7 +163,18 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                 logger.error(f"Failed to send ERROR webhook for '{label}'")
                     # else: skip empty label
                 else:
-                    logger.debug(f"Parent {parent_node.pk} failed but has no children — nothing to report")
+                    # Parent failed before spawning any children — report using parent's own label
+                    label = parent_node.label
+                    if label and label.strip():
+                        status = get_node_status(parent_node, child_types=[], logger=logger)
+                        if send_webhook(webhook_url, label.strip(), status, key=get_auth_key()):
+                            logger.warning(
+                                f"ERROR webhook sent for parent '{label}' (status: {status}, no children spawned)"
+                            )
+                        else:
+                            logger.error(f"Failed to send ERROR webhook for parent '{label}' (no children)")
+                    else:
+                        logger.debug(f"Parent {parent_node.pk} failed but has no children and no label — skipping")
                 # Mark the parent as processed (if allowed)
                 if not no_commit:
                     parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)

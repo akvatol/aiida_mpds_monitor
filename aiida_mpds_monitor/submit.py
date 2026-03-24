@@ -80,9 +80,20 @@ def submit_parent(
                         f"Parent {parent_pk} failed, but child workchain has no label — skipping"
                     )
         else:
-            print(
-                f"Parent {parent_pk} failed but launched no child workchains — nothing to report"
-            )
+            # Parent failed before spawning any children — report using parent's own label
+            label = parent_node.label
+            if label and label.strip():
+                status = get_node_status(parent_node, child_types=[])
+                payload = label.strip()
+                if dry_run:
+                    print(f"[DRY-RUN] Parent {parent_pk} failed with no children — would send: payload='{payload}', status='{status}'")
+                else:
+                    if send_webhook(webhook_url, payload, status, key=webhook_key):
+                        print(f"Sent ERROR webhook for parent '{payload}' ({status}, no children spawned)")
+                    else:
+                        print(f"Failed to send webhook for parent '{payload}'", file=sys.stderr)
+            else:
+                print(f"Parent {parent_pk} failed but has no children and no label — skipping")
         return
 
     # Normal case: parent is OK — process all subnodes
