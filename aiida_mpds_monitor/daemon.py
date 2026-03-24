@@ -9,7 +9,9 @@ from aiida.orm import QueryBuilder, WorkChainNode
 
 from .config import get_auth_key, load_config
 from .status import (
+    EXTRA_INPROGRESS_SENT,
     EXTRA_PARENT_PROCESSED,
+    STATUS_WAITING,
     get_node_status,
 )
 from .webhook import send_webhook
@@ -70,12 +72,26 @@ def process_base_workchain(
     # Send webhook when state changes or when terminal state is reached
     already_finished = base_node.base.extras.get(EXTRA_PARENT_PROCESSED, False)
 
+    inprogress_sent = base_node.base.extras.get(EXTRA_INPROGRESS_SENT, False)
     if force:
         already_finished = False
+        inprogress_sent = False
 
     if not already_finished:
         status = get_node_status(base_node, child_types=grandchild_types, logger=logger)
 
+        # still running
+        if status == STATUS_WAITING:
+            if not inprogress_sent:
+                if send_webhook(webhook_url, label, status, key=webhook_key):
+                    if not no_commit:
+                        base_node.set_extra(EXTRA_INPROGRESS_SENT, True)
+                    logger.info(f"In-progress webhook sent for '{label}'")
+                else:
+                    logger.warning(f"Failed to send in-progress webhook for '{label}'")
+            return None
+
+        # finished or excepted
         if send_webhook(webhook_url, label, status, key=webhook_key):
             if not no_commit:
                 base_node.set_extra(EXTRA_PARENT_PROCESSED, True)
@@ -154,9 +170,10 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 continue
 
         # Normal processing
-        all_sent = True
+        all_terminal = True
+        any_failed = False
         for base_node in base_nodes:
-            sent = process_base_workchain(
+            result = process_base_workchain(
                 base_node,
                 webhook_url,
                 get_auth_key(),
@@ -165,15 +182,20 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 parent_label,
                 no_commit=no_commit,
             )
-            if sent is False:
-                all_sent = False
+            if result is False:
+                any_failed = True
+                all_terminal = False
+            elif result is None:
+                all_terminal = False
 
-        if all_sent:
+        if all_terminal:
             if not no_commit:
                 parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
             logger.info(f"Parent {parent_node.pk} marked as processed")
-        else:
+        elif any_failed:
             logger.warning(f"Parent {parent_node.pk} NOT marked — some webhooks failed, will retry next scan")
+        else:
+            logger.debug(f"Parent {parent_node.pk} still in progress — will check again next scan")
 
 
 # For dry-run testing
