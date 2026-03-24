@@ -85,7 +85,7 @@ def process_base_workchain(
             if not inprogress_sent:
                 if send_webhook(webhook_url, label, status, key=webhook_key):
                     if not no_commit:
-                        base_node.set_extra(EXTRA_INPROGRESS_SENT, True)
+                        base_node.base.extras.set(EXTRA_INPROGRESS_SENT, True)
                     logger.info(f"In-progress webhook sent for '{label}'")
                 else:
                     logger.warning(f"Failed to send in-progress webhook for '{label}'")
@@ -94,7 +94,7 @@ def process_base_workchain(
         # finished or excepted
         if send_webhook(webhook_url, label, status, key=webhook_key):
             if not no_commit:
-                base_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                base_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
             logger.info(f"Webhook sent for '{label}' (status: {status})")
             return True
         else:
@@ -158,7 +158,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                     f"ERROR webhook sent for subtask '{label}' (status: {status}, parent {parent_node.pk} failed)"
                                 )
                                 if not no_commit:
-                                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                                    parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
                             else:
                                 logger.error(f"Failed to send ERROR webhook for '{label}'")
                     # else: skip empty label
@@ -166,7 +166,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                     logger.debug(f"Parent {parent_node.pk} failed but has no children — nothing to report")
                 # Mark the parent as processed (if allowed)
                 if not no_commit:
-                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                    parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
                 continue
 
         # Normal processing
@@ -190,7 +190,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
 
         if all_terminal:
             if not no_commit:
-                parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
             logger.info(f"Parent {parent_node.pk} marked as processed")
         elif any_failed:
             logger.warning(f"Parent {parent_node.pk} NOT marked — some webhooks failed, will retry next scan")
