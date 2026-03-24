@@ -60,7 +60,7 @@ def process_base_workchain(
     label = base_node.label
     if not label or not label.strip():
         logger.debug(f"Skipping {base_node.process_label} {base_node.pk} — empty label")
-        return
+        return True
 
     label = label.strip()
     # Get grandchild types to check from hierarchy
@@ -80,8 +80,11 @@ def process_base_workchain(
             if not no_commit:
                 base_node.set_extra(EXTRA_PARENT_PROCESSED, True)
             logger.info(f"Webhook sent for '{label}' (status: {status})")
+            return True
         else:
             logger.warning(f"Failed to send webhook for '{label}'")
+            return False
+    return True
 
 
 def scan_and_process(config, logger, no_commit=False, force=False):
@@ -151,8 +154,9 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 continue
 
         # Normal processing
+        all_sent = True
         for base_node in base_nodes:
-            process_base_workchain(
+            sent = process_base_workchain(
                 base_node,
                 webhook_url,
                 get_auth_key(),
@@ -161,10 +165,15 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 parent_label,
                 no_commit=no_commit,
             )
+            if sent is False:
+                all_sent = False
 
-        if not no_commit:
-            parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
-        logger.info(f"Parent {parent_node.pk} marked as processed")
+        if all_sent:
+            if not no_commit:
+                parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+            logger.info(f"Parent {parent_node.pk} marked as processed")
+        else:
+            logger.warning(f"Parent {parent_node.pk} NOT marked — some webhooks failed, will retry next scan")
 
 
 # For dry-run testing
