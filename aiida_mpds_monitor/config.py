@@ -6,7 +6,7 @@ import yaml
 from aiida.common.extendeddicts import AttributeDict
 
 
-DEFAULT_CONFIG_PATH = Path.home() / ".aiida" / "aiida_mpds_monitor"
+DEFAULT_CONFIG_PATH = Path.home() / ".aiida" / "aiida_mpds_monitor" / "conf.yaml"
 
 DEFAULT_CONFIG = {
     "webhook_url": "http://localhost:8080",
