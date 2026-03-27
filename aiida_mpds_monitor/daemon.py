@@ -105,6 +105,7 @@ def process_base_workchain(
 
 def scan_and_process(config, logger, no_commit=False, force=False):
     webhook_url = config.webhook_url
+    webhook_key = get_auth_key(config)
     # Get parent workchain types from hierarchy keys
     hierarchy = config.get("workchain_hierarchy", {})
     workchain_types = list(hierarchy.keys())
@@ -152,7 +153,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                 webhook_url,
                                 label.strip(),
                                 status,
-                                key=get_auth_key(),
+                                key=webhook_key,
                             ):
                                 logger.warning(
                                     f"ERROR webhook sent for subtask '{label}' (status: {status}, parent {parent_node.pk} failed)"
@@ -167,7 +168,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                     label = parent_node.label
                     if label and label.strip():
                         status = get_node_status(parent_node, child_types=[], logger=logger)
-                        if send_webhook(webhook_url, label.strip(), status, key=get_auth_key()):
+                        if send_webhook(webhook_url, label.strip(), status, key=webhook_key):
                             logger.warning(
                                 f"ERROR webhook sent for parent '{label}' (status: {status}, no children spawned)"
                             )
@@ -187,7 +188,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
             result = process_base_workchain(
                 base_node,
                 webhook_url,
-                get_auth_key(),
+                webhook_key,
                 logger,
                 hierarchy,
                 parent_label,

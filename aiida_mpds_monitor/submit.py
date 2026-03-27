@@ -158,9 +158,11 @@ def main():
     level = level_map.get(args.logging_level.upper(), logging.ERROR)
 
     logging.basicConfig(level=level)
-    webhook_key = get_auth_key()
+    webhook_key = get_auth_key(config)
     if not webhook_key:
-        logging.warning("Caanot find 'MPDS_MONITOR_KEY' varibale in the enviroment.")
+        logging.warning(
+            "Cannot find authentication key in MPDS_MONITOR_KEY or config auth_key."
+        )
 
     try:
         submit_parent(
