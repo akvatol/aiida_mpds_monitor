@@ -61,4 +61,4 @@ def get_auth_key(config=None):
     if config is None:
         return ""
 
-    return config.get("auth_key") or config.get("security_key") or ""
+    return config.get("auth_key") or ""
