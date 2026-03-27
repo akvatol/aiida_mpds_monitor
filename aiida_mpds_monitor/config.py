@@ -6,10 +6,11 @@ import yaml
 from aiida.common.extendeddicts import AttributeDict
 
 
-DEFAULT_CONFIG_PATH = Path("~/.aiida/aiida_mpds_monitor")
+DEFAULT_CONFIG_PATH = Path.home() / ".aiida" / "aiida_mpds_monitor"
 
 DEFAULT_CONFIG = {
     "webhook_url": "http://localhost:8080",
+    "auth_key": "",
     "poll_interval": 30,
     "workchain_hierarchy": {
         "MPDSStructureWorkChain": {
@@ -47,10 +48,17 @@ def load_config():
     return AttributeDict(final_config)
 
 
-def get_auth_key():
-    """Get authentication key from MPDS_MONITOR_KEY environment variable.
+def get_auth_key(config=None):
+    """Get authentication key from environment or config.
 
     Returns:
         str: The authentication key, or empty string if not set
     """
-    return os.environ.get("MPDS_MONITOR_KEY", "")
+    auth_key = os.environ.get("MPDS_MONITOR_KEY", "")
+    if auth_key:
+        return auth_key
+
+    if config is None:
+        return ""
+
+    return config.get("auth_key") or config.get("security_key") or ""
