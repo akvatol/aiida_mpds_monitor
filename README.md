@@ -20,12 +20,15 @@ pip install .
 ## Configuration
 On first run, the tool creates a default config file:
 
-System-wide: `/etc/aiida_mpds_monitor/conf.yaml`
-Fallback (user): `~/.config/aiida_mpds_monitor/conf.yaml` (if no write access to /etc)
+User scope: `~/.aiida/aiida_mpds_monitor`
 
 ```yaml
 # Webhook endpoint
 webhook_url: "http://localhost:8080"
+
+# Optional authentication key for webhook requests.
+# MPDS_MONITOR_KEY from the environment has priority if both are set.
+auth_key: "your-api-key"
 
 # How often to scan AiiDA database (seconds)
 poll_interval: 60
@@ -48,15 +51,22 @@ log_backup_count: 5           # Keep 5 rotated logs
 1. Configure the workchain hierarchy:
 
 ```yaml
-# conf.yaml
+# ~/.aiida/aiida_mpds_monitor
 webhook_url: "http://example.com/webhook"
+auth_key: "your-api-key"
 workchain_hierarchy:
   ParentType:
     ChildType:
       - GrandchildType1
 ```
 
-2. Set the authentication key and run the daemon:
+2. Run the daemon:
+```bash
+aiida-mpds-monitor
+```
+
+You can also keep the authentication key in the environment instead of the config file:
+
 ```bash
 export MPDS_MONITOR_KEY="your-api-key"
 aiida-mpds-monitor
@@ -101,11 +111,17 @@ Useful for backfilling or debugging:
 
 ```bash
 # Send webhooks for all configured children of parent PK=12345
-export MPDS_MONITOR_KEY="your-api-key"
 aiida-mpds-submit 12345
 
 # Dry-run: see what would be sent (no HTTP request)
 aiida-mpds-submit 12345 --dry-run
+```
+
+If you prefer environment-based auth instead of storing the key in the settings file:
+
+```bash
+export MPDS_MONITOR_KEY="your-api-key"
+aiida-mpds-submit 12345
 ```
 
 ## Testing with Stub Server

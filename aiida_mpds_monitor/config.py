@@ -6,10 +6,11 @@ import yaml
 from aiida.common.extendeddicts import AttributeDict
 
 
-DEFAULT_CONFIG_PATH = Path("/etc/aiida_mpds_monitor/conf.yaml")
+DEFAULT_CONFIG_PATH = Path.home() / ".aiida" / "aiida_mpds_monitor" / "conf.yaml"
 
 DEFAULT_CONFIG = {
     "webhook_url": "http://localhost:8080",
+    "auth_key": "",
     "poll_interval": 30,
     "workchain_hierarchy": {
         "MPDSStructureWorkChain": {
@@ -25,13 +26,8 @@ DEFAULT_CONFIG = {
 
 def ensure_config_dir():
     config_dir = DEFAULT_CONFIG_PATH.parent
-    if not config_dir.exists():
-        try:
-            config_dir.mkdir(parents=True, exist_ok=True)
-            os.chmod(config_dir, 0o755)
-        except PermissionError:
-            fallback = Path.home() / ".config/aiida_mpds_monitor/conf.yaml"
-            return fallback
+    config_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(config_dir, 0o755)
     return DEFAULT_CONFIG_PATH
 
 
@@ -40,18 +36,9 @@ def load_config():
 
     if not config_path.exists():
         print(f"Creating default config at {config_path}")
-        try:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_path, "w") as f:
-                yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False)
-            config_path.chmod(0o644)
-        except PermissionError:
-            fallback = Path.home() / ".config/aiida_mpds_monitor/conf.yaml"
-            fallback.parent.mkdir(parents=True, exist_ok=True)
-            print(f"Using fallback config: {fallback}")
-            with open(fallback, "w") as f:
-                yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False)
-            config_path = fallback
+        with open(config_path, "w") as f:
+            yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False)
+        config_path.chmod(0o644)
 
     with open(config_path) as f:
         user_config = yaml.safe_load(f) or {}
@@ -61,10 +48,17 @@ def load_config():
     return AttributeDict(final_config)
 
 
-def get_auth_key():
-    """Get authentication key from MPDS_MONITOR_KEY environment variable.
+def get_auth_key(config=None):
+    """Get authentication key from environment or config.
 
     Returns:
         str: The authentication key, or empty string if not set
     """
-    return os.environ.get("MPDS_MONITOR_KEY", "")
+    auth_key = os.environ.get("MPDS_MONITOR_KEY", "")
+    if auth_key:
+        return auth_key
+
+    if config is None:
+        return ""
+
+    return config.get("auth_key") or ""

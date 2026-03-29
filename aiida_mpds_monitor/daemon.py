@@ -9,7 +9,9 @@ from aiida.orm import QueryBuilder, WorkChainNode
 
 from .config import get_auth_key, load_config
 from .status import (
+    EXTRA_INPROGRESS_SENT,
     EXTRA_PARENT_PROCESSED,
+    STATUS_WAITING,
     get_node_status,
 )
 from .webhook import send_webhook
@@ -60,7 +62,7 @@ def process_base_workchain(
     label = base_node.label
     if not label or not label.strip():
         logger.debug(f"Skipping {base_node.process_label} {base_node.pk} — empty label")
-        return
+        return True
 
     label = label.strip()
     # Get grandchild types to check from hierarchy
@@ -70,22 +72,40 @@ def process_base_workchain(
     # Send webhook when state changes or when terminal state is reached
     already_finished = base_node.base.extras.get(EXTRA_PARENT_PROCESSED, False)
 
+    inprogress_sent = base_node.base.extras.get(EXTRA_INPROGRESS_SENT, False)
     if force:
         already_finished = False
+        inprogress_sent = False
 
     if not already_finished:
         status = get_node_status(base_node, child_types=grandchild_types, logger=logger)
 
+        # still running
+        if status == STATUS_WAITING:
+            if not inprogress_sent:
+                if send_webhook(webhook_url, label, status, key=webhook_key):
+                    if not no_commit:
+                        base_node.base.extras.set(EXTRA_INPROGRESS_SENT, True)
+                    logger.info(f"In-progress webhook sent for '{label}'")
+                else:
+                    logger.warning(f"Failed to send in-progress webhook for '{label}'")
+            return None
+
+        # finished or excepted
         if send_webhook(webhook_url, label, status, key=webhook_key):
             if not no_commit:
-                base_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                base_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
             logger.info(f"Webhook sent for '{label}' (status: {status})")
+            return True
         else:
             logger.warning(f"Failed to send webhook for '{label}'")
+            return False
+    return True
 
 
 def scan_and_process(config, logger, no_commit=False, force=False):
     webhook_url = config.webhook_url
+    webhook_key = get_auth_key(config)
     # Get parent workchain types from hierarchy keys
     hierarchy = config.get("workchain_hierarchy", {})
     workchain_types = list(hierarchy.keys())
@@ -133,38 +153,62 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                 webhook_url,
                                 label.strip(),
                                 status,
-                                key=get_auth_key(),
+                                key=webhook_key,
                             ):
                                 logger.warning(
                                     f"ERROR webhook sent for subtask '{label}' (status: {status}, parent {parent_node.pk} failed)"
                                 )
                                 if not no_commit:
-                                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                                    parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
                             else:
                                 logger.error(f"Failed to send ERROR webhook for '{label}'")
                     # else: skip empty label
                 else:
-                    logger.debug(f"Parent {parent_node.pk} failed but has no children — nothing to report")
+                    # Parent failed before spawning any children — report using parent's own label
+                    label = parent_node.label
+                    if label and label.strip():
+                        status = get_node_status(parent_node, child_types=[], logger=logger)
+                        if send_webhook(webhook_url, label.strip(), status, key=webhook_key):
+                            logger.warning(
+                                f"ERROR webhook sent for parent '{label}' (status: {status}, no children spawned)"
+                            )
+                        else:
+                            logger.error(f"Failed to send ERROR webhook for parent '{label}' (no children)")
+                    else:
+                        logger.debug(f"Parent {parent_node.pk} failed but has no children and no label — skipping")
                 # Mark the parent as processed (if allowed)
                 if not no_commit:
-                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                    parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
                 continue
 
         # Normal processing
+        all_terminal = True
+        any_failed = False
         for base_node in base_nodes:
-            process_base_workchain(
+            result = process_base_workchain(
                 base_node,
                 webhook_url,
-                get_auth_key(),
+                webhook_key,
                 logger,
                 hierarchy,
                 parent_label,
                 no_commit=no_commit,
+                force=force,
             )
+            if result is False:
+                any_failed = True
+                all_terminal = False
+            elif result is None:
+                all_terminal = False
 
-        if not no_commit:
-            parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
-        logger.info(f"Parent {parent_node.pk} marked as processed")
+        if all_terminal:
+            if not no_commit:
+                parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
+            logger.info(f"Parent {parent_node.pk} marked as processed")
+        elif any_failed:
+            logger.warning(f"Parent {parent_node.pk} NOT marked — some webhooks failed, will retry next scan")
+        else:
+            logger.debug(f"Parent {parent_node.pk} still in progress — will check again next scan")
 
 
 # For dry-run testing
