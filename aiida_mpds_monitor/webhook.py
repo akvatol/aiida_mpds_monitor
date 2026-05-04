@@ -27,6 +27,8 @@ def send_webhook(webhook_url, payload, status, key=None):
         if response.status_code == 200:
             return True
 
+        data["key"] = "***"
+
         if response.status_code == 409:
             logger.info(
                 "Webhook returned 409 for %s (already exists on server) — marking as done; data=%r",
@@ -45,6 +47,9 @@ def send_webhook(webhook_url, payload, status, key=None):
         )
         return False
     except Exception as e:
+
+        data["key"] = "***"
+
         logger.error(
             "Webhook error: %s (url=%s, data=%r)",
             e,
