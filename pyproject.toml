@@ -16,17 +16,17 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering"
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
     "aiida-core>=2.0",
+    "dft-organizer",
     "PyYAML",
-    "requests"
+    "requests",
 ]
 
 [project.optional-dependencies]
@@ -43,3 +43,6 @@ Repository = "https://github.com/mpds-io/aiida_mpds_monitor"
 aiida-mpds-monitor = "aiida_mpds_monitor.daemon:main"
 aiida-mpds-submit = "aiida_mpds_monitor.submit:main"
 aiida-mpds-stub = "aiida_mpds_monitor.stub_server:main"
+
+[tool.uv.sources]
+dft-organizer = { git = "https://github.com/mpds-io/dft_organizer.git" }
