@@ -6,6 +6,7 @@ from aiida import load_profile
 from aiida.orm import WorkChainNode, load_node
 
 from .config import get_auth_key, load_config
+from .generate_archive import generate_parent_archive
 from .status import (
     get_node_status,
 )
@@ -111,6 +112,15 @@ def submit_parent(
                 print(f"Sent webhook for '{label}' ({status})")
             else:
                 print(f"Failed to send webhook for '{label}'", file=sys.stderr)
+
+    # Create parent archive with all child results
+    if not dry_run:
+        print(f"Generating parent archive for {parent_pk}...")
+        archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
+        if archive_path:
+            print(f"Parent archive successfully created: {archive_path}")
+        else:
+            print(f"Failed to create parent archive for {parent_pk}", file=sys.stderr)
 
 
 def main():
