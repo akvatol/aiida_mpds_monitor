@@ -92,6 +92,7 @@ def generate_archive(uuid: str, archive_path: Optional[Path] = None, tmp_root: O
         print("Failed to create archive")
         return None
 
+
 def generate_parent_archive(
     parent_uuid: str,
     base_nodes: Optional[List[WorkChainNode]] = None,
@@ -101,25 +102,7 @@ def generate_parent_archive(
     """
     Generate a 7z archive for the parent WorkChain with subdirectories for each grandchild calculation.
 
-    Creates a temporary folder with structure:
-    externalArchive/
-      <GRANDCHILD_LABEL_1>/  (e.g., ELASTIC)
-        [grandchild_1 retrieved files + INPUT.json]
-      <GRANDCHILD_LABEL_2>/  (e.g., STRUCT)
-        [grandchild_2 retrieved files + INPUT.json]
-      ...
-
-    Then compresses it using `compress_with_7z` and returns the created archive Path or `None` on error.
-
-    Args:
-        parent_uuid: UUID of the parent WorkChain
-        base_nodes: List of child WorkChainNode objects to include in archive.
-                   If None, will fetch from parent_uuid.called
-        archive_path: Path where to save the archive. Defaults to tmp_root.parent / f"{parent_uuid}_external.7z"
-        tmp_root: Root directory for temporary files. Defaults to current working dir / "aiida_archives_tmp"
-
-    Returns:
-        Path to the created archive or None on error
+    Uses a temporary directory under `tmp_root/{parent_uuid}` and removes it after compression.
     """
     try:
         parent = load_node(parent_uuid)
@@ -139,87 +122,92 @@ def generate_parent_archive(
     tmp_root = Path(tmp_root)
     tmp_root.mkdir(parents=True, exist_ok=True)
 
-    # Create externalArchive root directory
-    archive_root = tmp_root / parent_uuid / "externalArchive"
-    if archive_root.exists():
-        shutil.rmtree(archive_root.parent)
+    parent_tmp = tmp_root / parent_uuid
+    archive_root = parent_tmp / "externalArchive"
+
+    # Remove any existing temp dir for this parent, then create fresh
+    if parent_tmp.exists():
+        shutil.rmtree(parent_tmp)
     archive_root.mkdir(parents=True, exist_ok=True)
 
-    # Process each child workchain and collect data from its grandchildren
-    for child_node in base_nodes:
-        if not isinstance(child_node, WorkChainNode):
-            continue
-
-        # Get grandchildren (called nodes) from this child
-        grandchildren = child_node.called if hasattr(child_node, "called") else []
-        
-        for grandchild in grandchildren:
-            # Use label as subdirectory name (e.g., "ELASTIC", "STRUCT")
-            label = getattr(grandchild, "label", None)
-            if not label or not str(label).strip():
+    try:
+        # Process each child workchain and collect data from its grandchildren
+        for child_node in base_nodes:
+            if not isinstance(child_node, WorkChainNode):
                 continue
-            
-            label_str = str(label).strip().replace("/", "_")
-            grandchild_dir = archive_root / label_str
-            grandchild_dir.mkdir(parents=True, exist_ok=True)
 
-            # Copy retrieved files from grandchild node
-            try:
-                repo_folder = getattr(grandchild.outputs, "retrieved", None)
-                if repo_folder is not None:
-                    names = repo_folder.list_object_names()
-                    for name in names:
+            grandchildren = child_node.called if hasattr(child_node, "called") else []
+            for grandchild in grandchildren:
+                label = getattr(grandchild, "label", None)
+                if not label or not str(label).strip():
+                    continue
+
+                label_str = str(label).strip()
+                grandchild_dir = archive_root / label_str
+                grandchild_dir.mkdir(parents=True, exist_ok=True)
+
+                try:
+                    repo_folder = getattr(grandchild.outputs, "retrieved", None)
+                    if repo_folder is not None:
+                        names = repo_folder.list_object_names()
+                        for name in names:
+                            try:
+                                with repo_folder.open(name, "rb") as src, (grandchild_dir / name).open("wb") as dst:
+                                    shutil.copyfileobj(src, dst)
+                            except Exception as e:
+                                print(f"Warning: Could not copy {name} from {label_str} {grandchild.pk}: {e}")
+                except Exception as e:
+                    print(f"Warning: Could not access retrieved folder for {label_str} {grandchild.pk}: {e}")
+
+                try:
+                    params = None
+                    if hasattr(grandchild.inputs, "parameters"):
                         try:
-                            with repo_folder.open(name, "rb") as src, (grandchild_dir / name).open("wb") as dst:
+                            params = grandchild.inputs.parameters.get_dict()
+                        except Exception:
+                            params = None
+
+                    if params:
+                        with (grandchild_dir / "INPUT.json").open("w") as f:
+                            json.dump(params, f, indent=2, default=str)
+                except Exception as e:
+                    print(f"Warning: Could not save INPUT.json for {label_str} {grandchild.pk}: {e}")
+
+                try:
+                    repo_folder = getattr(grandchild.outputs, "retrieved", None)
+                    if repo_folder is not None:
+                        names = repo_folder.list_object_names()
+                        if "OUTPUT" in names:
+                            with repo_folder.open("OUTPUT", "rb") as src, (grandchild_dir / "OUTPUT").open("wb") as dst:
                                 shutil.copyfileobj(src, dst)
-                        except Exception as e:
-                            print(f"Warning: Could not copy {name} from {label_str} {grandchild.pk}: {e}")
-            except Exception as e:
-                print(f"Warning: Could not access retrieved folder for {label_str} {grandchild.pk}: {e}")
+                        elif "_scheduler-stderr.txt" in names:
+                            with (
+                                repo_folder.open("_scheduler-stderr.txt", "rb") as src,
+                                (grandchild_dir / "_scheduler-stderr.txt").open("wb") as dst,
+                            ):
+                                shutil.copyfileobj(src, dst)
+                except Exception:
+                    pass
 
-            # Write INPUT.json if parameters are present
-            try:
-                params = None
-                if hasattr(grandchild.inputs, "parameters"):
-                    try:
-                        params = grandchild.inputs.parameters.get_dict()
-                    except Exception:
-                        params = None
+        # Determine archive path
+        if archive_path is None:
+            archive_path = tmp_root.parent / f"{parent_uuid}_external.7z"
+        archive_path = Path(archive_path)
 
-                if params:
-                    with (grandchild_dir / "INPUT.json").open("w") as f:
-                        json.dump(params, f, indent=2, default=str)
-            except Exception as e:
-                print(f"Warning: Could not save INPUT.json for {label_str} {grandchild.pk}: {e}")
-
-            # Ensure OUTPUT or scheduler stderr is present
-            try:
-                repo_folder = getattr(grandchild.outputs, "retrieved", None)
-                if repo_folder is not None:
-                    names = repo_folder.list_object_names()
-                    if "OUTPUT" in names:
-                        with repo_folder.open("OUTPUT", "rb") as src, (grandchild_dir / "OUTPUT").open("wb") as dst:
-                            shutil.copyfileobj(src, dst)
-                    elif "_scheduler-stderr.txt" in names:
-                        with (
-                            repo_folder.open("_scheduler-stderr.txt", "rb") as src,
-                            (grandchild_dir / "_scheduler-stderr.txt").open("wb") as dst,
-                        ):
-                            shutil.copyfileobj(src, dst)
-            except Exception:
-                pass
-
-    if archive_path is None:
-        archive_path = tmp_root.parent / f"{parent_uuid}_external.7z"
-    archive_path = Path(archive_path)
-
-    ok = compress_with_7z(archive_root.parent, archive_path)
-    if ok:
-        print(f"Parent archive created: {archive_path}")
-        return archive_path
-    else:
-        print("Failed to create parent archive")
-        return None
+        ok = compress_with_7z(parent_tmp, archive_path)
+        if ok:
+            print(f"Parent archive created: {archive_path}")
+            return archive_path
+        else:
+            print("Failed to create parent archive")
+            return None
+    finally:
+        # Always attempt to remove the temporary directory
+        try:
+            if parent_tmp.exists():
+                shutil.rmtree(parent_tmp)
+        except Exception as e:
+            print(f"Warning: Failed to clean up temp dir {parent_tmp}: {e}")
 
 
 if __name__ == "__main__":
