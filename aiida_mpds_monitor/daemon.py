@@ -8,6 +8,7 @@ from aiida import load_profile
 from aiida.orm import QueryBuilder, WorkChainNode
 
 from .config import get_auth_key, load_config
+from .generate_archive import generate_parent_archive
 from .status import (
     EXTRA_PARENT_PROCESSED,
     get_node_status,
@@ -138,11 +139,16 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                 logger.warning(
                                     f"ERROR webhook sent for subtask '{label}' (status: {status}, parent {parent_node.pk} failed)"
                                 )
-                                if not no_commit:
-                                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
                             else:
                                 logger.error(f"Failed to send ERROR webhook for '{label}'")
-                    # else: skip empty label
+                    try:
+                        archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
+                        if archive_path:
+                            logger.info(f"Generated archive for failed parent {parent_node.pk}: {archive_path}")
+                        else:
+                            logger.warning(f"Failed to generate archive for failed parent {parent_node.pk}")
+                    except Exception as e:
+                        logger.exception(f"Error generating archive for failed parent {parent_node.pk}: {e}")
                 else:
                     logger.debug(f"Parent {parent_node.pk} failed but has no children — nothing to report")
                 # Mark the parent as processed (if allowed)
@@ -161,6 +167,17 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 parent_label,
                 no_commit=no_commit,
             )
+
+        # Generate archive for this parent after sending webhooks
+        if base_nodes:
+            try:
+                archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
+                if archive_path:
+                    logger.info(f"Generated archive for parent {parent_node.pk}: {archive_path}")
+                else:
+                    logger.warning(f"Failed to generate archive for parent {parent_node.pk}")
+            except Exception as e:
+                logger.exception(f"Error generating archive for parent {parent_node.pk}: {e}")
 
         if not no_commit:
             parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
