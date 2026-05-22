@@ -10,7 +10,7 @@ from .generate_archive import generate_parent_archive
 from .status import (
     get_node_status,
 )
-from .webhook import send_webhook
+from .webhook import send_webhook, send_archive
 
 
 def submit_parent(
@@ -119,6 +119,16 @@ def submit_parent(
         archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
         if archive_path:
             print(f"Parent archive successfully created: {archive_path}")
+            try:
+                upload_url = f"{webhook_url.rstrip('/')}/upload/absolidix"
+                bid = config.get("archive_bid", None)
+                schema_id = config.get("archive_schema_id", None)
+                if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=webhook_key):
+                    print(f"Archive uploaded successfully to {upload_url}")
+                else:
+                    print(f"Failed to upload archive to {upload_url}", file=sys.stderr)
+            except Exception as e:
+                print(f"Error uploading archive: {e}", file=sys.stderr)
         else:
             print(f"Failed to create parent archive for {parent_pk}", file=sys.stderr)
 
