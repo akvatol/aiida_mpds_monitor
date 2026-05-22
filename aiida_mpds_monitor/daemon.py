@@ -13,7 +13,7 @@ from .status import (
     EXTRA_PARENT_PROCESSED,
     get_node_status,
 )
-from .webhook import send_webhook
+from .webhook import send_webhook, send_archive
 
 
 def setup_logger(config):
@@ -145,6 +145,17 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                         archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
                         if archive_path:
                             logger.info(f"Generated archive for failed parent {parent_node.pk}: {archive_path}")
+                            # Attempt to upload the archive
+                            try:
+                                upload_url = f"{config.webhook_url.rstrip('/')}/upload/absolidix"
+                                bid = config.get("archive_bid", None)
+                                schema_id = config.get("archive_schema_id", None)
+                                if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_auth_key()):
+                                    logger.info(f"Uploaded archive for failed parent {parent_node.pk} to {upload_url}")
+                                else:
+                                    logger.warning(f"Failed to upload archive for failed parent {parent_node.pk} to {upload_url}")
+                            except Exception as e:
+                                logger.exception(f"Error uploading archive for failed parent {parent_node.pk}: {e}")
                         else:
                             logger.warning(f"Failed to generate archive for failed parent {parent_node.pk}")
                     except Exception as e:
@@ -174,6 +185,17 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
                 if archive_path:
                     logger.info(f"Generated archive for parent {parent_node.pk}: {archive_path}")
+                    # Attempt to upload the archive
+                    try:
+                        upload_url = f"{config.webhook_url.rstrip('/')}/upload/absolidix"
+                        bid = config.get("archive_bid", None)
+                        schema_id = config.get("archive_schema_id", None)
+                        if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_auth_key()):
+                            logger.info(f"Uploaded archive for parent {parent_node.pk} to {upload_url}")
+                        else:
+                            logger.warning(f"Failed to upload archive for parent {parent_node.pk} to {upload_url}")
+                    except Exception as e:
+                        logger.exception(f"Error uploading archive for parent {parent_node.pk}: {e}")
                 else:
                     logger.warning(f"Failed to generate archive for parent {parent_node.pk}")
             except Exception as e:
