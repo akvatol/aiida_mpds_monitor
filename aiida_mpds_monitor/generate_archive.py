@@ -6,10 +6,19 @@ from typing import Optional, List
 from aiida import load_profile as load_aiida_profile
 from aiida.orm import load_node, WorkChainNode
 
+import re
+
 load_aiida_profile()
 
 from dft_organizer.core import archive_and_save
 
+LABEL_DICT = {
+    "Elastic constants":"ELASTIC",
+    "Phonon frequencies":"PHONON",
+    "Geometry optimization":"STRUCT",
+    "":"TRANSPORT",
+    "":"ELECTRON",
+}
 
 def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
     """Confirm that archive_and_save created the expected archive and move it if needed.
@@ -177,12 +186,14 @@ def generate_parent_archive(
                 if not label or not str(label).strip():
                     continue
 
-                label_str = str(label).strip()
-                label_str = label_str.replace("/", "_")
+                label_ = str(label).strip()
+                label_ = label_.replace("/", "_")
+                if res := re.search(r"\s(\w+\s\w+)\s(?=\[\d\])", label_):
+                    label_ = res.group(1)
+                    label_str = LABEL_DICT.get(label_, label_)
                 grandchild_dir = archive_root / label_str
                 grandchild_dir.mkdir(parents=True, exist_ok=True)
 
-                print(label_str)
 
                 try:
                     repo_folder = getattr(grandchild.outputs, "retrieved", None)
@@ -194,12 +205,12 @@ def generate_parent_archive(
                                     shutil.copyfileobj(src, dst)
                             except Exception as e:
                                 print(
-                                    f"Warning: Could not copy {name} from {label_str} "
+                                    f"Warning: Could not copy {name} from {label_} "
                                     f"{grandchild.pk}: {e}"
                                 )
                 except Exception as e:
                     print(
-                        f"Warning: Could not access retrieved folder for {label_str} "
+                        f"Warning: Could not access retrieved folder for {label_} "
                         f"{grandchild.pk}: {e}"
                     )
 
@@ -216,7 +227,7 @@ def generate_parent_archive(
                             json.dump(params, f, indent=2, default=str)
                 except Exception as e:
                     print(
-                        f"Warning: Could not save INPUT.json for {label_str} "
+                        f"Warning: Could not save INPUT.json for {label_} "
                         f"{grandchild.pk}: {e}"
                     )
 
