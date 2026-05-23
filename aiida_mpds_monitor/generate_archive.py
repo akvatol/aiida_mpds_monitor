@@ -8,16 +8,40 @@ from aiida.orm import load_node, WorkChainNode
 
 load_aiida_profile()
 
-from dft_organizer.core import compress_with_7z
+from dft_organizer.core import archive_and_save
 
 
-def generate_archive(uuid: str, archive_path: Optional[Path] = None, tmp_root: Optional[Path] = None) -> Optional[Path]:
+def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
+    """Confirm that archive_and_save created the expected archive and move it if needed.
+
+    archive_and_save always writes ``{resolved_source_dir}.7z`` next to the source
+    directory. If *dest_path* differs from that location, the file is moved.
+    Returns the path to the final archive, or ``None`` if nothing was created.
+    """
+    resolved = Path(source_dir).resolve()
+    expected = resolved.parent / f"{resolved.name}.7z"
+    if not expected.exists():
+        return None
+
+    dest = Path(dest_path)
+    if dest.resolve() != expected:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(expected), str(dest))
+
+    return dest
+
+
+def generate_archive(
+    uuid: str,
+    archive_path: Optional[Path] = None,
+    tmp_root: Optional[Path] = None,
+) -> Optional[Path]:
     """
     Generate a 7z archive for the AiiDA calculation with given UUID.
 
     Creates a temporary folder with the calculation's retrieved files and
-    an `INPUT.json` (if parameters exist), then compresses it using
-    `compress_with_7z` and returns the created archive Path or `None` on error.
+    an ``INPUT.json`` (if parameters exist), then compresses it using
+    :func:`dft_organizer.core.archive_and_save`.
     """
     try:
         calc = load_node(uuid)
@@ -40,7 +64,7 @@ def generate_archive(uuid: str, archive_path: Optional[Path] = None, tmp_root: O
         shutil.rmtree(calc_dir)
     calc_dir.mkdir(parents=True, exist_ok=True)
 
-    # copy all files from retrieved folder
+    # Copy all files from retrieved folder
     try:
         names = repo_folder.list_object_names()
         for name in names:
@@ -50,7 +74,7 @@ def generate_archive(uuid: str, archive_path: Optional[Path] = None, tmp_root: O
         print(f"Error copying files for {uuid}: {e}")
         return None
 
-    # write INPUT.json if parameters are present
+    # Write INPUT.json if parameters are present
     try:
         params = None
         if hasattr(calc.inputs, "parameters"):
@@ -65,7 +89,7 @@ def generate_archive(uuid: str, archive_path: Optional[Path] = None, tmp_root: O
     except Exception:
         pass
 
-    # ensure OUTPUT or scheduler stderr is present in the archive
+    # Ensure OUTPUT or scheduler stderr is present in the archive
     try:
         names = repo_folder.list_object_names()
         if "OUTPUT" in names:
@@ -84,13 +108,15 @@ def generate_archive(uuid: str, archive_path: Optional[Path] = None, tmp_root: O
         archive_path = tmp_root.parent / f"{uuid}.7z"
     archive_path = Path(archive_path)
 
-    ok = compress_with_7z(calc_dir, archive_path)
-    if ok:
-        print(f"Archive created: {archive_path}")
-        return archive_path
+    # archive_and_save creates {calc_dir}.7z next to calc_dir
+    _ = archive_and_save(calc_dir, make_report=False)
+
+    result = _finalize_archive(calc_dir, archive_path)
+    if result:
+        print(f"Archive created: {result}")
     else:
-        print("Failed to create archive")
-        return None
+        print(f"Failed to create archive for {uuid}")
+    return result
 
 
 def generate_parent_archive(
@@ -100,9 +126,11 @@ def generate_parent_archive(
     tmp_root: Optional[Path] = None,
 ) -> Optional[Path]:
     """
-    Generate a 7z archive for the parent WorkChain with subdirectories for each grandchild calculation.
+    Generate a 7z archive for the parent WorkChain with subdirectories for each
+    grandchild calculation.
 
-    Uses a temporary directory under `tmp_root/{parent_uuid}` and removes it after compression.
+    Uses a temporary directory under ``tmp_root/{parent_uuid}`` and removes it
+    after compression.
     """
     try:
         parent = load_node(parent_uuid)
@@ -155,9 +183,15 @@ def generate_parent_archive(
                                 with repo_folder.open(name, "rb") as src, (grandchild_dir / name).open("wb") as dst:
                                     shutil.copyfileobj(src, dst)
                             except Exception as e:
-                                print(f"Warning: Could not copy {name} from {label_str} {grandchild.pk}: {e}")
+                                print(
+                                    f"Warning: Could not copy {name} from {label_str} "
+                                    f"{grandchild.pk}: {e}"
+                                )
                 except Exception as e:
-                    print(f"Warning: Could not access retrieved folder for {label_str} {grandchild.pk}: {e}")
+                    print(
+                        f"Warning: Could not access retrieved folder for {label_str} "
+                        f"{grandchild.pk}: {e}"
+                    )
 
                 try:
                     params = None
@@ -171,7 +205,10 @@ def generate_parent_archive(
                         with (grandchild_dir / "INPUT.json").open("w") as f:
                             json.dump(params, f, indent=2, default=str)
                 except Exception as e:
-                    print(f"Warning: Could not save INPUT.json for {label_str} {grandchild.pk}: {e}")
+                    print(
+                        f"Warning: Could not save INPUT.json for {label_str} "
+                        f"{grandchild.pk}: {e}"
+                    )
 
                 try:
                     repo_folder = getattr(grandchild.outputs, "retrieved", None)
@@ -189,18 +226,20 @@ def generate_parent_archive(
                 except Exception:
                     pass
 
-        # Determine archive path
         if archive_path is None:
             archive_path = tmp_root.parent / f"{parent_uuid}_external.7z"
         archive_path = Path(archive_path)
 
-        ok = compress_with_7z(parent_tmp, archive_path)
-        if ok:
-            print(f"Parent archive created: {archive_path}")
-            return archive_path
+        # archive_and_save creates {parent_tmp}.7z next to parent_tmp
+        _ = archive_and_save(parent_tmp, make_report=False)
+
+        result = _finalize_archive(parent_tmp, archive_path)
+        if result:
+            print(f"Parent archive created: {result}")
         else:
             print("Failed to create parent archive")
-            return None
+        return result
+
     finally:
         # Always attempt to remove the temporary directory
         try:
