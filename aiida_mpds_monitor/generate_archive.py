@@ -220,7 +220,7 @@ def generate_archive(
 
 
 # ---------------------------------------------------------------------------
-#  Parent-node archive (structured:  structure_name/PHON, OPTIMISE ... )
+#  Parent-node archive (structured:  structure_name/task_type/... )
 # ---------------------------------------------------------------------------
 
 def generate_parent_archive(
@@ -240,10 +240,11 @@ def generate_parent_archive(
             ELAST/
             ...
 
-    * ``structure_name`` is derived from the parent label (e.g.
-      ``'C/227/cF8'`` -> ``'C_227_cF8'``).
-    * Task sub-folders are grouped by grandchild task type (e.g. *Geometry
-      optimization* -> ``OPTIMISE``).
+    All files from each task's grandchildren are placed **directly** in the
+    task folder (no extra sub-directories per grandchild).
+
+    * ``structure_name`` is derived from the parent label.
+    * Task sub-folders are grouped by grandchild task type.
     """
     try:
         parent = load_node(parent_uuid)
@@ -296,16 +297,10 @@ def generate_parent_archive(
                 task_dir = archive_root / task_name
                 task_dir.mkdir(parents=True, exist_ok=True)
 
-                # Each grandchild gets its own folder inside the task folder
-                # named after the raw label (sanitised) so multiple retries
-                # of the same task do not clobber one another.
-                gc_dir_name = _sanitize_for_filename(label_str)
-                gc_dir = task_dir / gc_dir_name
-                gc_dir.mkdir(parents=True, exist_ok=True)
-
-                _copy_retrieved_files(grandchild, gc_dir)
-                _write_input_json(grandchild, gc_dir)
-                _copy_output_or_stderr(grandchild, gc_dir)
+                # Files go directly into the task folder (no per-grandchild sub-dirs)
+                _copy_retrieved_files(grandchild, task_dir)
+                _write_input_json(grandchild, task_dir)
+                _copy_output_or_stderr(grandchild, task_dir)
 
         # -- Compress ---------------------------------------------------------
         if archive_path is None:
