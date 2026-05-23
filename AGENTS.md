@@ -149,6 +149,7 @@ aiida-mpds-submit 12345 --dry-run
 - **Required review points**: changes to `status.py` logic, webhook schema, or
   archive layout should be double-checked because they affect the remote MPDS
   backend contract.
+- **Don't fight errors**: Every time you encounter the same error twice, research the web and find 3-5 possible fixes. Then choose the most effective solution and implement it.
 
 ## Extensibility Hooks
 
