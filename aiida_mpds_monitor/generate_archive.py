@@ -193,8 +193,6 @@ def generate_parent_archive(
                     label_str = LABEL_DICT.get(label_, label_)
                 grandchild_dir = archive_root / label_str
                 grandchild_dir.mkdir(parents=True, exist_ok=True)
-
-
                 try:
                     repo_folder = getattr(grandchild.outputs, "retrieved", None)
                     if repo_folder is not None:
