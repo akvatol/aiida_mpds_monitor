@@ -1,13 +1,13 @@
 # Project Overview
 
-`aiida-mpds-monitor` is a lightweight Python daemon and CLI toolkit that polls an
+`aiida-mpds-monitor` is a Python daemon and CLI toolkit that polls an
 [AiiDA](https://www.aiida.net/) profile, watches hierarchical workchains
 (parent → child → grandchild), and dispatches webhook notifications when nodes
-reach terminal states. It is built for the Materials Platform for Data Science
-(MPDS) backend: when a calculation finishes or fails the tool sends a status
-payload to a configured endpoint and, on failure, bundles retrieved outputs into
-a `7z` archive and uploads it. The hierarchy and endpoint are fully driven by a
-YAML config file, so no code changes are needed to monitor new workchain types.
+reach terminal states. Built for the Materials Platform for Data Science
+(MPDS) backend: when a calculation finishes or fails, it sends a status
+payload to a configured endpoint, bundles retrieved outputs into a `7z`
+archive, and uploads it. The hierarchy and endpoints are driven by a YAML
+config file, so you can monitor new workchain types without code changes.
 
 ## Repository Structure
 
@@ -23,6 +23,7 @@ aiida-mpds-monitor/
 │   ├── stub_server.py            # Local HTTP stub for webhook testing
 │   └── __init__.py               # Package init (empty)
 ├── tests/                        # pytest unit tests (mock-based)
+│   ├── test_config_and_cleanup.py # URL resolution and archive cleanup tests
 │   ├── test_status.py            # Status logic tests
 │   └── test_webhook.py           # Webhook sender tests
 ├── openspec/                     # Project-specific OpenSpec configuration
@@ -96,44 +97,51 @@ aiida-mpds-submit 12345 --dry-run
 
 **Key components**
 
-1. **daemon.py** — main polling loop. Queries `WorkChainNode` objects by
-   `process_label`, walks `called` descendants, and delegates status checks and
-   delivery. Marks processed parents with an AiiDA extra
-   (`webhook_parent_processed`) to avoid duplicates.
-2. **status.py** — translates AiiDA process states (`finished`, `running`,
+1. **daemon.py** polls `WorkChainNode` objects by `process_label`, walks
+   `called` descendants, and delegates status checks and delivery. Marks
+   processed parents with an AiiDA extra (`webhook_parent_processed`) to avoid
+   duplicates. After a successful archive upload, deletes the local `.7z` file
+   unless `archive_keep` is `true`.
+2. **status.py** translates AiiDA process states (`finished`, `running`,
    `excepted`, …) into a small internal vocabulary (`finished`, `excepted`,
-   `waiting`). Also inspects the last grandchild calculation to detect child
-   failures even when the parent itself reports a clean exit.
-3. **webhook.py** — thin `requests` wrapper: `send_webhook` POSTs
+   `waiting`). Inspects the last grandchild calculation to detect child
+   failures even when the parent reports a clean exit.
+3. **webhook.py** is a thin `requests` wrapper: `send_webhook` POSTs
    `payload`+`status`+`key`; `send_archive` uploads a `7z` file as
    `multipart/form-data`.
-4. **submit.py** — one-shot CLI that reuses the same logic to submit a single
-   parent PK without looping.
-5. **config.py** — loads `conf.yaml`, merging user values over `DEFAULT_CONFIG`.
-   Falls back from `/etc/…` to `~/.config/…` on permission errors.
+4. **submit.py** is a one-shot CLI that reuses the same logic to submit a
+   single parent PK without looping. Deletes `.7z` after successful upload
+   unless `archive_keep` is `true`.
+5. **config.py** loads `conf.yaml`, merging user values over `DEFAULT_CONFIG`.
+   Falls back from `/etc/…` to `~/.config/…` on permission errors. Provides
+   `resolve_archive_upload_url(config, logger=None)`: returns
+   `archive_upload_url` if set, otherwise derives it from `webhook_url` and
+   emits a deprecation warning.
 
 ## Testing Strategy
 
 - **Unit tests** (`pytest`):
-  - `tests/test_status.py` — mocked node trees exercising `get_node_status` and
+  - `tests/test_config_and_cleanup.py` -- `resolve_archive_upload_url` fallback
+    logic, `archive_keep` cleanup (delete on success, retain on failure or
+    `archive_keep=true`).
+  - `tests/test_status.py` -- mocked node trees exercising `get_node_status` and
     `check_child_calculation` for success, failure, exception, and custom child
     type scenarios.
-  - `tests/test_webhook.py` — mocked `requests.post` verifying success, error,
+  - `tests/test_webhook.py` -- mocked `requests.post` verifying success, error,
     timeout, and auth-key inclusion.
-- **Coverage**: `pytest-cov` is configured in `pytest.ini` (`--cov=aiida_mpds_monitor`).
-- **Manual / integration**: there are no automated integration tests against a
-  live AiiDA profile. Use `aiida-mpds-stub` to receive webhooks locally and
-  validate end-to-end flow by hand.
-- **CI**: > TODO: no GitHub Actions or other CI workflows are present.
+- **Coverage**: `pytest-cov` configured in `pytest.ini` (`--cov=aiida_mpds_monitor`).
+- **Manual / integration**: no automated integration tests against a live AiiDA
+  profile. Use `aiida-mpds-stub` to receive webhooks locally and validate by hand.
+- **CI**: TODO: no GitHub Actions or other CI workflows.
 
 ## Security & Compliance
 
-- **Secrets**: the auth key is supplied only via the `MPDS_MONITOR_KEY`
-  environment variable; it is never committed to source or config files.
-- **Webhook payload**: sent as form data (not JSON). The optional `key` field is
-  included in the POST body; ensure the endpoint uses TLS in production.
-- **Dependency scanning**: > TODO: no automated vulnerability scan (Dependabot,
-  Snyx, etc.) is configured.
+- **Secrets**: the auth key comes from the `MPDS_MONITOR_KEY` environment
+  variable only; it is never committed to source or config files.
+- **Webhook payload**: sent as form data (not JSON). The `key` field is
+  included in the POST body; use TLS on the endpoint in production.
+- **Dependency scanning**: TODO: no automated vulnerability scan (Dependabot,
+  Snyk, etc.).
 - **License**: MIT (`LICENSE` at repository root).
 
 ## Agent Guardrails
@@ -143,31 +151,34 @@ aiida-mpds-submit 12345 --dry-run
 - **Never touch** `uv.lock` by hand; use `uv lock` or `uv pip install` if
   dependencies change.
 - **Configuration files** (`conf.yaml`) are user-managed; do not generate or ship
-  real endpoint URLs / secrets in templates.
+  real endpoint URLs or secrets in templates.
 - **AiiDA extras**: the daemon writes `webhook_parent_processed` to nodes.
-  Changing the extra key name must be treated as a breaking change.
+  Changing the extra key name is a breaking change.
 - **Required review points**: changes to `status.py` logic, webhook schema, or
-  archive layout should be double-checked because they affect the remote MPDS
-  backend contract.
-- **Don't fight errors**: Every time you encounter the same error twice, research the web and find 3-5 possible fixes. Then choose the most effective solution and implement it.
+  archive layout affect the remote MPDS backend contract. Double-check them.
+- **Don't fight errors**: if you hit the same error twice, research 3-5 fixes,
+  pick the best one, and implement it.
 
 ## Extensibility Hooks
 
-- **`workchain_hierarchy`** in `conf.yaml` — declarative map of parent → child
-  → grandchild labels. Adding a new monitored hierarchy requires only a config
-  edit.
+- **`workchain_hierarchy`** in `conf.yaml` -- declarative map of parent → child
+  → grandchild labels. Add a new hierarchy by editing config only.
 - **Environment variables**:
-  - `MPDS_MONITOR_KEY` — bearer-like auth token sent with every request.
-- **Optional archive metadata** in config:
-  - `archive_bid` — uploaded as `bid` form field.
-  - `archive_schema_id` — uploaded as `schema_id` form field.
+  - `MPDS_MONITOR_KEY` -- bearer-like auth token sent with every request.
+- **Archive config** in `conf.yaml`:
+  - `archive_upload_url` -- full URL for archive uploads. Leave empty to fall
+    back to `webhook_url + "/upload/absolidix"` (logs a deprecation warning).
+  - `archive_keep` -- boolean (default `false`). When `true`, local `.7z`
+    archives are kept on disk after successful upload; when `false`, deleted.
+  - `archive_bid` -- uploaded as `bid` form field.
+  - `archive_schema_id` -- uploaded as `schema_id` form field.
 - **CLI flags** (no env vars needed):
-  - `--dry-run` — scan and log, skip sends and marks.
-  - `--no-commit` — send webhooks but skip setting AiiDA extras.
-  - `--resend-all` — ignore existing processed flags and re-deliver.
-  - `--logging-level` / `-l` — runtime verbosity (`DEBUG` … `CRITICAL`).
-- **Logging destinations**: `log_file`, `log_max_bytes`, `log_backup_count` are
-  all configurable via YAML.
+  - `--dry-run` -- scan and log, skip sends and marks.
+  - `--no-commit` -- send webhooks but skip setting AiiDA extras.
+  - `--resend-all` -- ignore existing processed flags and re-deliver.
+  - `--logging-level` / `-l` -- runtime verbosity (`DEBUG` ... `CRITICAL`).
+- **Logging destinations**: `log_file`, `log_max_bytes`, `log_backup_count`
+  are all configurable via YAML.
 
 ## Further Reading
 
