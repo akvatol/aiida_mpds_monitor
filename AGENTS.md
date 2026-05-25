@@ -16,7 +16,7 @@ aiida-mpds-monitor/
 ├── aiida_mpds_monitor/           # Main package
 │   ├── daemon.py                 # Polling loop and node processing
 │   ├── submit.py                 # One-shot CLI for manual parent submission
-│   ├── config.py                 # YAML config loading and defaults
+│   ├── config.py                 # YAML config loading, defaults, archive key resolution
 │   ├── status.py                 # State inspection and child failure checks
 │   ├── webhook.py                # HTTP webhook / archive upload sender
 │   ├── generate_archive.py       # Builds 7z archives from AiiDA retrieved data
@@ -100,8 +100,9 @@ aiida-mpds-submit 12345 --dry-run
 1. **daemon.py** polls `WorkChainNode` objects by `process_label`, walks
    `called` descendants, and delegates status checks and delivery. Marks
    processed parents with an AiiDA extra (`webhook_parent_processed`) to avoid
-   duplicates. After a successful archive upload, deletes the local `.7z` file
-   unless `archive_keep` is `true`.
+   duplicates. Archive generation and upload are gated by the `send_archive`
+   config key (default `true`). After a successful archive upload, deletes the
+   local `.7z` file unless `archive_keep` is `true`.
 2. **status.py** translates AiiDA process states (`finished`, `running`,
    `excepted`, …) into a small internal vocabulary (`finished`, `excepted`,
    `waiting`). Inspects the last grandchild calculation to detect child
@@ -110,22 +111,24 @@ aiida-mpds-submit 12345 --dry-run
    `payload`+`status`+`key`; `send_archive` uploads a `7z` file as
    `multipart/form-data`.
 4. **submit.py** is a one-shot CLI that reuses the same logic to submit a
-   single parent PK without looping. Deletes `.7z` after successful upload
-   unless `archive_keep` is `true`.
+   single parent PK without looping. Respects the `send_archive` config to
+   skip archive generation. Deletes `.7z` after successful upload unless
+   `archive_keep` is `true`.
 5. **config.py** loads `conf.yaml`, merging user values over `DEFAULT_CONFIG`.
    Falls back from `/etc/…` to `~/.config/…` on permission errors. Provides
    `resolve_archive_upload_url(config, logger=None)`: returns
    `archive_upload_url` if set, otherwise derives it from `webhook_url` and
-   emits a deprecation warning. Also provides `get_archive_key(config)`: returns
-   the archive auth key from `MPDS_ARCHIVE_KEY` env var, then `archive_key`
-   config, then falls back to `MPDS_MONITOR_KEY`.
+   emits a deprecation warning. Also provides `get_archive_key(config)`:
+   returns the archive auth key from `MPDS_ARCHIVE_KEY` env var, then
+   `archive_key` config, then falls back to `MPDS_MONITOR_KEY`.
 
 ## Testing Strategy
 
 - **Unit tests** (`pytest`):
   - `tests/test_config_and_cleanup.py` -- `resolve_archive_upload_url` fallback
-    logic, `get_archive_key` resolution order, `archive_keep` cleanup (delete
-    on success, retain on failure or `archive_keep=true`).
+    logic, `get_archive_key` resolution order, `send_archive` config default,
+    `archive_keep` cleanup (delete on success, retain on failure or
+    `archive_keep=true`).
   - `tests/test_status.py` -- mocked node trees exercising `get_node_status` and
     `check_child_calculation` for success, failure, exception, and custom child
     type scenarios.
@@ -177,6 +180,8 @@ aiida-mpds-submit 12345 --dry-run
     config value, then falls back to `MPDS_MONITOR_KEY`.
   - `archive_keep` -- boolean (default `false`). When `true`, local `.7z`
     archives are kept on disk after successful upload; when `false`, deleted.
+  - `send_archive` -- boolean (default `true`). When `false`, skip archive
+    generation and upload entirely (webhooks are still sent).
   - `archive_bid` -- uploaded as `bid` form field.
   - `archive_schema_id` -- uploaded as `schema_id` form field.
 - **CLI flags** (no env vars needed):
