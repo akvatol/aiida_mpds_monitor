@@ -116,14 +116,16 @@ aiida-mpds-submit 12345 --dry-run
    Falls back from `/etc/…` to `~/.config/…` on permission errors. Provides
    `resolve_archive_upload_url(config, logger=None)`: returns
    `archive_upload_url` if set, otherwise derives it from `webhook_url` and
-   emits a deprecation warning.
+   emits a deprecation warning. Also provides `get_archive_key(config)`: returns
+   the archive auth key from `MPDS_ARCHIVE_KEY` env var, then `archive_key`
+   config, then falls back to `MPDS_MONITOR_KEY`.
 
 ## Testing Strategy
 
 - **Unit tests** (`pytest`):
   - `tests/test_config_and_cleanup.py` -- `resolve_archive_upload_url` fallback
-    logic, `archive_keep` cleanup (delete on success, retain on failure or
-    `archive_keep=true`).
+    logic, `get_archive_key` resolution order, `archive_keep` cleanup (delete
+    on success, retain on failure or `archive_keep=true`).
   - `tests/test_status.py` -- mocked node trees exercising `get_node_status` and
     `check_child_calculation` for success, failure, exception, and custom child
     type scenarios.
@@ -164,10 +166,15 @@ aiida-mpds-submit 12345 --dry-run
 - **`workchain_hierarchy`** in `conf.yaml` -- declarative map of parent → child
   → grandchild labels. Add a new hierarchy by editing config only.
 - **Environment variables**:
-  - `MPDS_MONITOR_KEY` -- bearer-like auth token sent with every request.
+  - `MPDS_MONITOR_KEY` -- bearer-like auth token sent with every webhook request.
+  - `MPDS_ARCHIVE_KEY` -- auth token for archive uploads. Overrides `archive_key`
+    config. Falls back to `MPDS_MONITOR_KEY` if neither is set.
 - **Archive config** in `conf.yaml`:
   - `archive_upload_url` -- full URL for archive uploads. Leave empty to fall
     back to `webhook_url + "/upload/absolidix"` (logs a deprecation warning).
+  - `archive_key` -- auth key for archive uploads. Resolved via
+    `get_archive_key()`: `MPDS_ARCHIVE_KEY` env var takes priority, then this
+    config value, then falls back to `MPDS_MONITOR_KEY`.
   - `archive_keep` -- boolean (default `false`). When `true`, local `.7z`
     archives are kept on disk after successful upload; when `false`, deleted.
   - `archive_bid` -- uploaded as `bid` form field.
