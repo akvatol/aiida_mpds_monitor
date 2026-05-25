@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "log_backup_count": 3,
     "archive_upload_url": "",
     "archive_keep": False,
+    "archive_key": "",
 }
 
 
@@ -69,6 +70,31 @@ def get_auth_key():
     Returns:
         str: The authentication key, or empty string if not set
     """
+    return os.environ.get("MPDS_MONITOR_KEY", "")
+
+
+def get_archive_key(config=None):
+    """Get the archive upload authentication key.
+
+    Resolution order:
+    1. ``MPDS_ARCHIVE_KEY`` environment variable
+    2. ``archive_key`` from config
+    3. Falls back to ``MPDS_MONITOR_KEY`` (the webhook key) for backward
+       compatibility
+
+    Args:
+        config: Loaded config object (AttributeDict). Optional.
+
+    Returns:
+        str: The archive authentication key, or empty string if none found.
+    """
+    env_key = os.environ.get("MPDS_ARCHIVE_KEY", "")
+    if env_key:
+        return env_key
+    if config:
+        cfg_key = config.get("archive_key", "")
+        if cfg_key:
+            return cfg_key
     return os.environ.get("MPDS_MONITOR_KEY", "")
 
 

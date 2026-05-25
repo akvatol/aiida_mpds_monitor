@@ -5,7 +5,7 @@ import sys
 from aiida import load_profile
 from aiida.orm import WorkChainNode, load_node
 
-from .config import get_auth_key, load_config, resolve_archive_upload_url
+from .config import get_archive_key, get_auth_key, load_config, resolve_archive_upload_url
 from .generate_archive import generate_parent_archive
 from .status import (
     get_node_status,
@@ -123,7 +123,7 @@ def submit_parent(
                 upload_url = resolve_archive_upload_url(config)
                 bid = config.get("archive_bid", None)
                 schema_id = config.get("archive_schema_id", None)
-                if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=webhook_key):
+                if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_archive_key(config)):
                     print(f"Archive uploaded successfully to {upload_url}")
                     if not config.get("archive_keep", False):
                         try:

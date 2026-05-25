@@ -7,7 +7,7 @@ import time
 from aiida import load_profile
 from aiida.orm import QueryBuilder, WorkChainNode
 
-from .config import get_auth_key, load_config, resolve_archive_upload_url
+from .config import get_archive_key, get_auth_key, load_config, resolve_archive_upload_url
 from .generate_archive import generate_parent_archive
 from .status import (
     EXTRA_PARENT_PROCESSED,
@@ -149,7 +149,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                 upload_url = resolve_archive_upload_url(config, logger=logger)
                                 bid = config.get("archive_bid", None)
                                 schema_id = config.get("archive_schema_id", None)
-                                if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_auth_key()):
+                                if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_archive_key(config)):
                                     logger.info(f"Uploaded archive for failed parent {parent_node.pk} to {upload_url}")
                                     if not config.get("archive_keep", False):
                                         try:
@@ -196,7 +196,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                         upload_url = resolve_archive_upload_url(config, logger=logger)
                         bid = config.get("archive_bid", None)
                         schema_id = config.get("archive_schema_id", None)
-                        if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_auth_key()):
+                        if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_archive_key(config)):
                             logger.info(f"Uploaded archive for parent {parent_node.pk} to {upload_url}")
                             if not config.get("archive_keep", False):
                                 try:
