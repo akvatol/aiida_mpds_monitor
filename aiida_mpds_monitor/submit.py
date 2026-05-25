@@ -114,7 +114,7 @@ def submit_parent(
                 print(f"Failed to send webhook for '{label}'", file=sys.stderr)
 
     # Create parent archive with all child results
-    if not dry_run:
+    if not dry_run and config and config.get("send_archive", True):
         print(f"Generating parent archive for {parent_pk}...")
         archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
         if archive_path:

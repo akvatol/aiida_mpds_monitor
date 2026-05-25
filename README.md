@@ -37,6 +37,9 @@ archive_keep: false
 # Can also be set via the MPDS_ARCHIVE_KEY environment variable.
 archive_key: ""
 
+# Disable archive generation and upload entirely (default: true)
+# send_archive: false
+
 poll_interval: 60
 
 workchain_hierarchy:
@@ -78,7 +81,7 @@ The daemon:
 - Walks each parent to its children and grandchildren.
 - Checks grandchild calculation status.
 - Sends a webhook with the status.
-- Generates a `.7z` archive and uploads it to `archive_upload_url`.
+- Generates a `.7z` archive and uploads it to `archive_upload_url` (skip with `send_archive: false`).
 - Deletes the local archive on successful upload (unless `archive_keep: true`).
 - Marks processed parents to avoid duplicates.
 
@@ -136,9 +139,9 @@ After sending a webhook, the daemon and CLI build a `.7z` archive and upload it 
 
 **`archive_upload_url`** sets the destination for archive uploads. Example curl equivalent:
 
-Leave `archive_upload_url` empty to derive it from `webhook_url + "/upload/absolidix"` (deprecated, produces a warning).
-
 **`archive_keep`** controls local cleanup. Default `false`: delete the `.7z` after a successful upload. Set `true` to keep archives on disk. Failed uploads retain the archive for manual recovery regardless of this setting.
+
+**`send_archive`** controls whether the daemon and CLI generate and upload archives at all. Default `true`. Set `false` to skip archive creation and upload entirely (webhooks are still sent).
 
 **`archive_key`** is the auth key sent with archive uploads. Resolution order: `MPDS_ARCHIVE_KEY` environment variable, then `archive_key` from config, then `MPDS_MONITOR_KEY` (the webhook key) as a fallback. This lets archive and webhook endpoints use separate credentials.
 

@@ -141,32 +141,33 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                 )
                             else:
                                 logger.error(f"Failed to send ERROR webhook for '{label}'")
-                    try:
-                        archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
-                        if archive_path:
-                            logger.info(f"Generated archive for failed parent {parent_node.pk}: {archive_path}")
-                            try:
-                                upload_url = resolve_archive_upload_url(config, logger=logger)
-                                bid = config.get("archive_bid", None)
-                                schema_id = config.get("archive_schema_id", None)
-                                if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_archive_key(config)):
-                                    logger.info(f"Uploaded archive for failed parent {parent_node.pk} to {upload_url}")
-                                    if not config.get("archive_keep", False):
-                                        try:
-                                            archive_path.unlink()
-                                            logger.info(f"Deleted archive {archive_path} after successful upload")
-                                        except OSError as exc:
-                                            logger.warning(f"Could not delete archive {archive_path}: {exc}")
+                    if config.get("send_archive", True):
+                        try:
+                            archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
+                            if archive_path:
+                                logger.info(f"Generated archive for failed parent {parent_node.pk}: {archive_path}")
+                                try:
+                                    upload_url = resolve_archive_upload_url(config, logger=logger)
+                                    bid = config.get("archive_bid", None)
+                                    schema_id = config.get("archive_schema_id", None)
+                                    if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_archive_key(config)):
+                                        logger.info(f"Uploaded archive for failed parent {parent_node.pk} to {upload_url}")
+                                        if not config.get("archive_keep", False):
+                                            try:
+                                                archive_path.unlink()
+                                                logger.info(f"Deleted archive {archive_path} after successful upload")
+                                            except OSError as exc:
+                                                logger.warning(f"Could not delete archive {archive_path}: {exc}")
+                                        else:
+                                            logger.info(f"Kept archive {archive_path} (archive_keep=true)")
                                     else:
-                                        logger.info(f"Kept archive {archive_path} (archive_keep=true)")
-                                else:
-                                    logger.warning(f"Failed to upload archive for failed parent {parent_node.pk} to {upload_url}; keeping {archive_path} for manual recovery")
-                            except Exception as e:
-                                logger.exception(f"Error uploading archive for failed parent {parent_node.pk}: {e}")
-                        else:
-                            logger.warning(f"Failed to generate archive for failed parent {parent_node.pk}")
-                    except Exception as e:
-                        logger.exception(f"Error generating archive for failed parent {parent_node.pk}: {e}")
+                                        logger.warning(f"Failed to upload archive for failed parent {parent_node.pk} to {upload_url}; keeping {archive_path} for manual recovery")
+                                except Exception as e:
+                                    logger.exception(f"Error uploading archive for failed parent {parent_node.pk}: {e}")
+                            else:
+                                logger.warning(f"Failed to generate archive for failed parent {parent_node.pk}")
+                        except Exception as e:
+                            logger.exception(f"Error generating archive for failed parent {parent_node.pk}: {e}")
                 else:
                     logger.debug(f"Parent {parent_node.pk} failed but has no children — nothing to report")
                 # Mark the parent as processed (if allowed)
@@ -187,7 +188,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
             )
 
         # Generate archive for this parent after sending webhooks
-        if base_nodes:
+        if base_nodes and config.get("send_archive", True):
             try:
                 archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
                 if archive_path:

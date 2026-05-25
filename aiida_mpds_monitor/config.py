@@ -23,6 +23,7 @@ DEFAULT_CONFIG = {
     "archive_upload_url": "",
     "archive_keep": False,
     "archive_key": "",
+    "send_archive": True,
 }
 
 
