@@ -20,6 +20,8 @@ DEFAULT_CONFIG = {
     "log_level": "WARNING",  # INFO, DEBUG, WARNING, ERROR
     "log_max_bytes": 10 * 1024 * 1024,  # 10 MB
     "log_backup_count": 3,
+    "archive_upload_url": "",
+    "archive_keep": False,
 }
 
 
@@ -68,3 +70,37 @@ def get_auth_key():
         str: The authentication key, or empty string if not set
     """
     return os.environ.get("MPDS_MONITOR_KEY", "")
+
+
+def resolve_archive_upload_url(config, logger=None):
+    """Resolve the archive upload URL from config.
+
+    Uses ``archive_upload_url`` if set; otherwise falls back to deriving it
+    from ``webhook_url`` and logs a deprecation warning.
+
+    Args:
+        config: Loaded config object (AttributeDict).
+        logger: Optional logger for deprecation warnings.
+
+    Returns:
+        str: The resolved upload URL.
+    """
+    url = config.get("archive_upload_url", "")
+    if url:
+        return url
+    fallback = f"{config.get('webhook_url', '').rstrip('/')}/upload/absolidix"
+    if logger:
+        logger.warning(
+            "archive_upload_url is not set; falling back to derived URL %r. "
+            "Set archive_upload_url in conf.yaml to suppress this warning.",
+            fallback,
+        )
+    else:
+        import warnings
+        warnings.warn(
+            f"archive_upload_url is not set; falling back to derived URL {fallback!r}. "
+            "Set archive_upload_url in conf.yaml to suppress this warning.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    return fallback
