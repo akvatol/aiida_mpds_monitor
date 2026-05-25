@@ -7,7 +7,7 @@ import time
 from aiida import load_profile
 from aiida.orm import QueryBuilder, WorkChainNode
 
-from .config import get_auth_key, load_config
+from .config import get_auth_key, load_config, resolve_archive_upload_url
 from .generate_archive import generate_parent_archive
 from .status import (
     EXTRA_PARENT_PROCESSED,
@@ -145,15 +145,22 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                         archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
                         if archive_path:
                             logger.info(f"Generated archive for failed parent {parent_node.pk}: {archive_path}")
-                            # Attempt to upload the archive
                             try:
-                                upload_url = f"{config.webhook_url.rstrip('/')}/upload/absolidix"
+                                upload_url = resolve_archive_upload_url(config, logger=logger)
                                 bid = config.get("archive_bid", None)
                                 schema_id = config.get("archive_schema_id", None)
                                 if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_auth_key()):
                                     logger.info(f"Uploaded archive for failed parent {parent_node.pk} to {upload_url}")
+                                    if not config.get("archive_keep", False):
+                                        try:
+                                            archive_path.unlink()
+                                            logger.info(f"Deleted archive {archive_path} after successful upload")
+                                        except OSError as exc:
+                                            logger.warning(f"Could not delete archive {archive_path}: {exc}")
+                                    else:
+                                        logger.info(f"Kept archive {archive_path} (archive_keep=true)")
                                 else:
-                                    logger.warning(f"Failed to upload archive for failed parent {parent_node.pk} to {upload_url}")
+                                    logger.warning(f"Failed to upload archive for failed parent {parent_node.pk} to {upload_url}; keeping {archive_path} for manual recovery")
                             except Exception as e:
                                 logger.exception(f"Error uploading archive for failed parent {parent_node.pk}: {e}")
                         else:
@@ -185,15 +192,22 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
                 if archive_path:
                     logger.info(f"Generated archive for parent {parent_node.pk}: {archive_path}")
-                    # Attempt to upload the archive
                     try:
-                        upload_url = f"{config.webhook_url.rstrip('/')}/upload/absolidix"
+                        upload_url = resolve_archive_upload_url(config, logger=logger)
                         bid = config.get("archive_bid", None)
                         schema_id = config.get("archive_schema_id", None)
                         if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_auth_key()):
                             logger.info(f"Uploaded archive for parent {parent_node.pk} to {upload_url}")
+                            if not config.get("archive_keep", False):
+                                try:
+                                    archive_path.unlink()
+                                    logger.info(f"Deleted archive {archive_path} after successful upload")
+                                except OSError as exc:
+                                    logger.warning(f"Could not delete archive {archive_path}: {exc}")
+                            else:
+                                logger.info(f"Kept archive {archive_path} (archive_keep=true)")
                         else:
-                            logger.warning(f"Failed to upload archive for parent {parent_node.pk} to {upload_url}")
+                            logger.warning(f"Failed to upload archive for parent {parent_node.pk} to {upload_url}; keeping {archive_path} for manual recovery")
                     except Exception as e:
                         logger.exception(f"Error uploading archive for parent {parent_node.pk}: {e}")
                 else:
