@@ -19,11 +19,12 @@ def send_webhook(webhook_url, payload, status, key=None):
         bool: True if webhook was sent successfully (status code 200), False otherwise
     """
     data = {"payload": payload, "status": status}
+    headers = {}
     if key:
-        data["key"] = key
+        headers["Authorization"] = f"Bearer {key}"
     try:
         response = requests.post(
-            webhook_url, data=data, timeout=10
+            webhook_url, data=data, headers=headers or None, timeout=10
         )
         if response.status_code == 200:
             return True
@@ -68,13 +69,21 @@ def send_archive(upload_url, archive_path, bid: int | None = None, schema_id: in
         data["bid"] = str(bid)
     if schema_id is not None:
         data["schema_id"] = str(schema_id)
+
+    headers = {}
     if key:
-        data["key"] = key
+        headers["Authorization"] = f"Bearer {key}"
 
     try:
         with open(archive_path, "rb") as fh:
             files = {"file": (Path(archive_path).name, fh, "application/x-7z-compressed")}
-            resp = requests.post(upload_url, data=data, files=files, timeout=timeout)
+            resp = requests.post(
+                upload_url,
+                data=data,
+                files=files,
+                headers=headers or None,
+                timeout=timeout,
+            )
 
         if resp.status_code == 200:
             return True
