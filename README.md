@@ -33,6 +33,10 @@ archive_upload_url: "http://localhost:8080"
 # Keep .7z archives on disk after upload? (default: false — delete on success)
 archive_keep: false
 
+# Auth key for archive uploads. Leave empty to fall back to MPDS_MONITOR_KEY.
+# Can also be set via the MPDS_ARCHIVE_KEY environment variable.
+archive_key: ""
+
 poll_interval: 60
 
 workchain_hierarchy:
@@ -63,6 +67,8 @@ workchain_hierarchy:
 
 ```bash
 export MPDS_MONITOR_KEY="your-api-key"
+# Optional: separate key for archive uploads
+export MPDS_ARCHIVE_KEY="your-archive-key"
 aiida-mpds-monitor
 ```
 
@@ -133,5 +139,7 @@ After sending a webhook, the daemon and CLI build a `.7z` archive and upload it 
 Leave `archive_upload_url` empty to derive it from `webhook_url + "/upload/absolidix"` (deprecated, produces a warning).
 
 **`archive_keep`** controls local cleanup. Default `false`: delete the `.7z` after a successful upload. Set `true` to keep archives on disk. Failed uploads retain the archive for manual recovery regardless of this setting.
+
+**`archive_key`** is the auth key sent with archive uploads. Resolution order: `MPDS_ARCHIVE_KEY` environment variable, then `archive_key` from config, then `MPDS_MONITOR_KEY` (the webhook key) as a fallback. This lets archive and webhook endpoints use separate credentials.
 
 Copyright © 2026 Materials Platform for Data Science OÜ
