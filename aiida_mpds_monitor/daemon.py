@@ -7,14 +7,15 @@ import time
 from aiida import load_profile
 from aiida.orm import QueryBuilder, WorkChainNode
 
-from .config import get_auth_key, load_config
+from .config import get_archive_key, get_auth_key, load_config, resolve_archive_upload_url
+from .generate_archive import generate_parent_archive
 from .status import (
     EXTRA_INPROGRESS_SENT,
     EXTRA_PARENT_PROCESSED,
     STATUS_WAITING,
     get_node_status,
 )
-from .webhook import send_webhook
+from .webhook import send_webhook, send_archive
 
 
 def setup_logger(config):
@@ -159,10 +160,36 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                     f"ERROR webhook sent for subtask '{label}' (status: {status}, parent {parent_node.pk} failed)"
                                 )
                                 if not no_commit:
-                                    parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
+                                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
                             else:
                                 logger.error(f"Failed to send ERROR webhook for '{label}'")
-                    # else: skip empty label
+                    if config.get("send_archive", True):
+                        try:
+                            archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
+                            if archive_path:
+                                logger.info(f"Generated archive for failed parent {parent_node.pk}: {archive_path}")
+                                try:
+                                    upload_url = resolve_archive_upload_url(config, logger=logger)
+                                    bid = config.get("archive_bid", None)
+                                    schema_id = config.get("archive_schema_id", None)
+                                    if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_archive_key(config)):
+                                        logger.info(f"Uploaded archive for failed parent {parent_node.pk} to {upload_url}")
+                                        if not config.get("archive_keep", False):
+                                            try:
+                                                archive_path.unlink()
+                                                logger.info(f"Deleted archive {archive_path} after successful upload")
+                                            except OSError as exc:
+                                                logger.warning(f"Could not delete archive {archive_path}: {exc}")
+                                        else:
+                                            logger.info(f"Kept archive {archive_path} (archive_keep=true)")
+                                    else:
+                                        logger.warning(f"Failed to upload archive for failed parent {parent_node.pk} to {upload_url}; keeping {archive_path} for manual recovery")
+                                except Exception as e:
+                                    logger.exception(f"Error uploading archive for failed parent {parent_node.pk}: {e}")
+                            else:
+                                logger.warning(f"Failed to generate archive for failed parent {parent_node.pk}")
+                        except Exception as e:
+                            logger.exception(f"Error generating archive for failed parent {parent_node.pk}: {e}")
                 else:
                     # Parent failed before spawning any children — report using parent's own label
                     label = parent_node.label
@@ -201,14 +228,9 @@ def scan_and_process(config, logger, no_commit=False, force=False):
             elif result is None:
                 all_terminal = False
 
-        if all_terminal:
-            if not no_commit:
-                parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
-            logger.info(f"Parent {parent_node.pk} marked as processed")
-        elif any_failed:
-            logger.warning(f"Parent {parent_node.pk} NOT marked — some webhooks failed, will retry next scan")
-        else:
-            logger.debug(f"Parent {parent_node.pk} still in progress — will check again next scan")
+        if not no_commit:
+            parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+        logger.info(f"Parent {parent_node.pk} marked as processed")
 
 
 # For dry-run testing

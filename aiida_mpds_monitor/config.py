@@ -6,7 +6,7 @@ import yaml
 from aiida.common.extendeddicts import AttributeDict
 
 
-DEFAULT_CONFIG_PATH = Path.home() / ".aiida" / "aiida_mpds_monitor" / "conf.yaml"
+DEFAULT_CONFIG_PATH = Path("/etc/aiida_mpds_monitor/conf.yaml")
 
 DEFAULT_CONFIG = {
     "webhook_url": "http://localhost:8080",
@@ -21,6 +21,10 @@ DEFAULT_CONFIG = {
     "log_level": "WARNING",  # INFO, DEBUG, WARNING, ERROR
     "log_max_bytes": 10 * 1024 * 1024,  # 10 MB
     "log_backup_count": 3,
+    "archive_upload_url": "",
+    "archive_keep": False,
+    "archive_key": "",
+    "send_archive": True,
 }
 
 
@@ -54,11 +58,4 @@ def get_auth_key(config=None):
     Returns:
         str: The authentication key, or empty string if not set
     """
-    auth_key = os.environ.get("MPDS_MONITOR_KEY", "")
-    if auth_key:
-        return auth_key
-
-    if config is None:
-        return ""
-
-    return config.get("auth_key") or ""
+    return os.environ.get("MPDS_MONITOR_KEY", "")

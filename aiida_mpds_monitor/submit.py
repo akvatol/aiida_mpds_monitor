@@ -5,11 +5,12 @@ import sys
 from aiida import load_profile
 from aiida.orm import WorkChainNode, load_node
 
-from .config import get_auth_key, load_config
+from .config import get_archive_key, get_auth_key, load_config, resolve_archive_upload_url
+from .generate_archive import generate_parent_archive
 from .status import (
     get_node_status,
 )
-from .webhook import send_webhook
+from .webhook import send_webhook, send_archive
 
 
 def submit_parent(
@@ -122,6 +123,33 @@ def submit_parent(
                 print(f"Sent webhook for '{label}' ({status})")
             else:
                 print(f"Failed to send webhook for '{label}'", file=sys.stderr)
+
+    # Create parent archive with all child results
+    if not dry_run and config and config.get("send_archive", True):
+        print(f"Generating parent archive for {parent_pk}...")
+        archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
+        if archive_path:
+            print(f"Parent archive successfully created: {archive_path}")
+            try:
+                upload_url = resolve_archive_upload_url(config)
+                bid = config.get("archive_bid", None)
+                schema_id = config.get("archive_schema_id", None)
+                if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_archive_key(config)):
+                    print(f"Archive uploaded successfully to {upload_url}")
+                    if not config.get("archive_keep", False):
+                        try:
+                            archive_path.unlink()
+                            print(f"Deleted archive {archive_path} after successful upload")
+                        except OSError as exc:
+                            print(f"Warning: could not delete archive {archive_path}: {exc}", file=sys.stderr)
+                    else:
+                        print(f"Kept archive {archive_path} (archive_keep=true)")
+                else:
+                    print(f"Failed to upload archive to {upload_url}; keeping {archive_path} for manual recovery", file=sys.stderr)
+            except Exception as e:
+                print(f"Error uploading archive: {e}", file=sys.stderr)
+        else:
+            print(f"Failed to create parent archive for {parent_pk}", file=sys.stderr)
 
 
 def main():
