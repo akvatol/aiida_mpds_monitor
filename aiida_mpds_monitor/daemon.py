@@ -10,7 +10,9 @@ from aiida.orm import QueryBuilder, WorkChainNode
 from .config import get_archive_key, get_auth_key, load_config, resolve_archive_upload_url
 from .generate_archive import generate_parent_archive
 from .status import (
+    EXTRA_INPROGRESS_SENT,
     EXTRA_PARENT_PROCESSED,
+    STATUS_WAITING,
     get_node_status,
 )
 from .webhook import send_webhook, send_archive
@@ -61,7 +63,7 @@ def process_base_workchain(
     label = base_node.label
     if not label or not label.strip():
         logger.debug(f"Skipping {base_node.process_label} {base_node.pk} — empty label")
-        return
+        return True
 
     label = label.strip()
     # Get grandchild types to check from hierarchy
@@ -71,22 +73,40 @@ def process_base_workchain(
     # Send webhook when state changes or when terminal state is reached
     already_finished = base_node.base.extras.get(EXTRA_PARENT_PROCESSED, False)
 
+    inprogress_sent = base_node.base.extras.get(EXTRA_INPROGRESS_SENT, False)
     if force:
         already_finished = False
+        inprogress_sent = False
 
     if not already_finished:
         status = get_node_status(base_node, child_types=grandchild_types, logger=logger)
 
+        # still running
+        if status == STATUS_WAITING:
+            if not inprogress_sent:
+                if send_webhook(webhook_url, label, status, key=webhook_key):
+                    if not no_commit:
+                        base_node.base.extras.set(EXTRA_INPROGRESS_SENT, True)
+                    logger.info(f"In-progress webhook sent for '{label}'")
+                else:
+                    logger.warning(f"Failed to send in-progress webhook for '{label}'")
+            return None
+
+        # finished or excepted
         if send_webhook(webhook_url, label, status, key=webhook_key):
             if not no_commit:
-                base_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                base_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
             logger.info(f"Webhook sent for '{label}' (status: {status})")
+            return True
         else:
             logger.warning(f"Failed to send webhook for '{label}'")
+            return False
+    return True
 
 
 def scan_and_process(config, logger, no_commit=False, force=False):
     webhook_url = config.webhook_url
+    webhook_key = get_auth_key(config)
     # Get parent workchain types from hierarchy keys
     hierarchy = config.get("workchain_hierarchy", {})
     workchain_types = list(hierarchy.keys())
@@ -134,11 +154,13 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                 webhook_url,
                                 label.strip(),
                                 status,
-                                key=get_auth_key(),
+                                key=webhook_key,
                             ):
                                 logger.warning(
                                     f"ERROR webhook sent for subtask '{label}' (status: {status}, parent {parent_node.pk} failed)"
                                 )
+                                if not no_commit:
+                                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
                             else:
                                 logger.error(f"Failed to send ERROR webhook for '{label}'")
                     if config.get("send_archive", True):
@@ -169,52 +191,42 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                         except Exception as e:
                             logger.exception(f"Error generating archive for failed parent {parent_node.pk}: {e}")
                 else:
-                    logger.debug(f"Parent {parent_node.pk} failed but has no children — nothing to report")
+                    # Parent failed before spawning any children — report using parent's own label
+                    label = parent_node.label
+                    if label and label.strip():
+                        status = get_node_status(parent_node, child_types=[], logger=logger)
+                        if send_webhook(webhook_url, label.strip(), status, key=webhook_key):
+                            logger.warning(
+                                f"ERROR webhook sent for parent '{label}' (status: {status}, no children spawned)"
+                            )
+                        else:
+                            logger.error(f"Failed to send ERROR webhook for parent '{label}' (no children)")
+                    else:
+                        logger.debug(f"Parent {parent_node.pk} failed but has no children and no label — skipping")
                 # Mark the parent as processed (if allowed)
                 if not no_commit:
-                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                    parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
                 continue
 
         # Normal processing
+        all_terminal = True
+        any_failed = False
         for base_node in base_nodes:
-            process_base_workchain(
+            result = process_base_workchain(
                 base_node,
                 webhook_url,
-                get_auth_key(),
+                webhook_key,
                 logger,
                 hierarchy,
                 parent_label,
                 no_commit=no_commit,
+                force=force,
             )
-
-        # Generate archive for this parent after sending webhooks
-        if base_nodes and config.get("send_archive", True):
-            try:
-                archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
-                if archive_path:
-                    logger.info(f"Generated archive for parent {parent_node.pk}: {archive_path}")
-                    try:
-                        upload_url = resolve_archive_upload_url(config, logger=logger)
-                        bid = config.get("archive_bid", None)
-                        schema_id = config.get("archive_schema_id", None)
-                        if send_archive(upload_url, archive_path, bid=bid, schema_id=schema_id, key=get_archive_key(config)):
-                            logger.info(f"Uploaded archive for parent {parent_node.pk} to {upload_url}")
-                            if not config.get("archive_keep", False):
-                                try:
-                                    archive_path.unlink()
-                                    logger.info(f"Deleted archive {archive_path} after successful upload")
-                                except OSError as exc:
-                                    logger.warning(f"Could not delete archive {archive_path}: {exc}")
-                            else:
-                                logger.info(f"Kept archive {archive_path} (archive_keep=true)")
-                        else:
-                            logger.warning(f"Failed to upload archive for parent {parent_node.pk} to {upload_url}; keeping {archive_path} for manual recovery")
-                    except Exception as e:
-                        logger.exception(f"Error uploading archive for parent {parent_node.pk}: {e}")
-                else:
-                    logger.warning(f"Failed to generate archive for parent {parent_node.pk}")
-            except Exception as e:
-                logger.exception(f"Error generating archive for parent {parent_node.pk}: {e}")
+            if result is False:
+                any_failed = True
+                all_terminal = False
+            elif result is None:
+                all_terminal = False
 
         if not no_commit:
             parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)

@@ -4,6 +4,7 @@ STATUS_DONE = "finished"
 STATUS_WAITING = "waiting"
 
 EXTRA_PARENT_PROCESSED = "webhook_parent_processed"
+EXTRA_INPROGRESS_SENT = "webhook_inprogress_sent"
 
 
 def check_child_calculation(base_node, child_types=None, logger=None):
@@ -70,7 +71,7 @@ def get_node_status(node, child_types=None, logger=None):
             return f"{STATUS_EXC}-{exit_code}"
         return STATUS_EXC
 
-    elif state.lower() in ["running", "submitting", "created"]:
+    elif state.lower() in ["running", "submitting", "created", "waiting", "paused"]:
         return STATUS_WAITING
 
     elif state.lower() == "excepted":

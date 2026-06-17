@@ -58,8 +58,9 @@ log_backup_count: 5
 1. Configure the workchain hierarchy:
 
 ```yaml
-# conf.yaml
+# ~/.aiida/aiida_mpds_monitor
 webhook_url: "http://example.com/webhook"
+auth_key: "your-api-key"
 workchain_hierarchy:
   ParentType:
     ChildType:
@@ -106,11 +107,17 @@ aiida-mpds-monitor --logging-level DEBUG      # debug daemon
 
 ```bash
 # Send webhooks for all configured children of parent PK=12345
-export MPDS_MONITOR_KEY="your-api-key"
 aiida-mpds-submit 12345
 
 # Dry-run: see what would be sent (no HTTP request)
 aiida-mpds-submit 12345 --dry-run
+```
+
+If you prefer environment-based auth instead of storing the key in the settings file:
+
+```bash
+export MPDS_MONITOR_KEY="your-api-key"
+aiida-mpds-submit 12345
 ```
 
 ## Testing with Stub Server

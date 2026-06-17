@@ -233,25 +233,48 @@ class TestGetNodeStatus:
 
         assert result == STATUS_WAITING
 
+    def test_waiting_state(self):
+        """Test waiting node status."""
+        node = MagicMock()
+        node.process_state.value = "waiting"
+
+        result = get_node_status(node)
+
+        assert result == STATUS_WAITING
+
+    def test_paused_state(self):
+        """Test paused node status."""
+        node = MagicMock()
+        node.process_state.value = "paused"
+
+        result = get_node_status(node)
+
+        assert result == STATUS_WAITING
+
     def test_excepted_state(self):
-        """Test excepted state."""
+        """Test excepted state with a child that has an exit code."""
+        child_node = MagicMock()
+        child_node.process_label = "CrystalParallelCalculation"
+        child_node.pk = 1
+        child_node.exit_code.status = 1
+
         node = MagicMock()
         node.process_state.value = "excepted"
-        node.exit_code.status = 1
+        node.called = [child_node]
 
         result = get_node_status(node)
 
         assert result == "excepted-1"
 
     def test_excepted_state_no_exit_code(self):
-        """Test excepted state without exit code."""
+        """Test excepted state without child exit code returns plain excepted."""
         node = MagicMock()
         node.process_state.value = "excepted"
-        node.exit_code = None
+        node.called = []
 
         result = get_node_status(node)
 
-        assert result == "excepted-1"
+        assert result == STATUS_EXC
 
     def test_unknown_state(self):
         """Test unknown state."""
@@ -270,6 +293,7 @@ class TestGetNodeStatus:
         child_node.is_failed = True
         child_node.is_excepted = False
         child_node.is_killed = False
+        child_node.exit_code = None
 
         node = MagicMock()
         node.process_state.value = "finished"
@@ -379,6 +403,7 @@ class TestGetNodeStatusWithCustomTypes:
         child_node.is_failed = True
         child_node.is_excepted = False
         child_node.is_killed = False
+        child_node.exit_code = None
 
         node = MagicMock()
         node.process_state.value = "finished"
@@ -419,6 +444,7 @@ class TestGetNodeStatusWithCustomTypes:
         child_node.is_failed = True
         child_node.is_excepted = False
         child_node.is_killed = False
+        child_node.exit_code = None
 
         node = MagicMock()
         node.process_state.value = "finished"
