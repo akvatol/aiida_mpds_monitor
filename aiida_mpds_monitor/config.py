@@ -52,10 +52,9 @@ def load_config():
     return AttributeDict(final_config)
 
 
-def get_auth_key(config=None):
-    """Get authentication key from environment or config.
-
-    Returns:
-        str: The authentication key, or empty string if not set
-    """
+def get_auth_key():
     return os.environ.get("MPDS_MONITOR_KEY", "")
+
+
+def get_archive_key():
+    return os.environ.get("MPDS_ARCHIVE_KEY") or get_auth_key()
