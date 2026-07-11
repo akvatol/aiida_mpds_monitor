@@ -53,7 +53,7 @@ def load_config():
 
 
 def get_auth_key(conf):
-    return conf.get("auth_key") or os.environ.get("MPDS_MONITOR_KEY") or raise EnvironmentError
+    return conf.get("auth_key") or os.environ.get("MPDS_MONITOR_KEY") or EnvironmentError
 
 
 def get_archive_key(conf):
