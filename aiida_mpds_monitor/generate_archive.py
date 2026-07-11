@@ -10,7 +10,7 @@ import re
 
 load_aiida_profile()
 
-from dft_organizer.core import archive_and_save
+from dft_organizer.archive import archive_and_save
 
 LABEL_DICT = {
     "Elastic constants":"ELASTIC",
