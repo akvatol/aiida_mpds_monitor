@@ -56,9 +56,10 @@ def get_auth_key():
     return os.environ.get("MPDS_MONITOR_KEY", "")
 
 
-def get_archive_key():
-    return os.environ.get("MPDS_ARCHIVE_KEY") or get_auth_key()
+def get_archive_key(conf):
+    return conf.get("archive_key") or os.environ.get("MPDS_ARCHIVE_KEY") or get_auth_key()
 
 
-def resolve_archive_upload_url():
-    return os.environ.get("ARCHIVE_UPLOAD_URL", "https://esdd.io/api/v1/tasks/upload/absolidix")
+def resolve_archive_upload_url(conf):
+    return conf.get("archive_upload_url") or os.environ.get("ARCHIVE_UPLOAD_URL",
+        "https://esdd.tilde.pro/api/v1/tasks/upload/absolidix")
