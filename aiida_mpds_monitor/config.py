@@ -58,3 +58,7 @@ def get_auth_key():
 
 def get_archive_key():
     return os.environ.get("MPDS_ARCHIVE_KEY") or get_auth_key()
+
+
+def resolve_archive_upload_url():
+    return os.environ.get("ARCHIVE_UPLOAD_URL", "https://esdd.io/api/v1/tasks/upload/absolidix")
