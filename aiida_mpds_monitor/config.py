@@ -52,8 +52,8 @@ def load_config():
     return AttributeDict(final_config)
 
 
-def get_auth_key():
-    return os.environ.get("MPDS_MONITOR_KEY", "")
+def get_auth_key(conf):
+    return conf.get("auth_key") or os.environ.get("MPDS_MONITOR_KEY") or raise EnvironmentError
 
 
 def get_archive_key(conf):
