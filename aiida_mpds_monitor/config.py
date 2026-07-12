@@ -60,6 +60,6 @@ def get_archive_key(conf):
     return conf.get("archive_key") or os.environ.get("MPDS_ARCHIVE_KEY") or get_auth_key()
 
 
-def resolve_archive_upload_url(conf):
+def resolve_archive_upload_url(conf, logger):
     return conf.get("archive_upload_url") or os.environ.get("ARCHIVE_UPLOAD_URL",
         "https://esdd.tilde.pro/api/v1/tasks/upload/absolidix")
