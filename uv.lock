@@ -89,11 +89,13 @@ dependencies = [
 
 [[package]]
 name = "aiida-mpds-monitor"
-version = "0.8.4"
+version = "0.9.14"
 source = { editable = "." }
 dependencies = [
     { name = "aiida-core" },
     { name = "dft-organizer" },
+    { name = "py7zr", version = "1.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "py7zr", version = "1.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pyyaml" },
     { name = "requests" },
 ]
@@ -109,6 +111,7 @@ dev = [
 requires-dist = [
     { name = "aiida-core", specifier = ">=2.0" },
     { name = "dft-organizer", git = "https://github.com/mpds-io/dft_organizer.git" },
+    { name = "py7zr" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=2.12" },
     { name = "pyyaml" },
