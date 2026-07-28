@@ -150,7 +150,7 @@ After sending a webhook, the daemon and CLI build a `.7z` archive and upload it 
 
 **`send_archive`** controls whether the daemon and CLI generate and upload archives at all. Default `true`. Set `false` to skip archive creation and upload entirely (webhooks are still sent).
 
-Before creating the `.7z`, the monitor checks the calculation folders. There must be exactly three folders and each must contain an `OUTPUT` file. Incomplete contents are not compressed or uploaded.
+Before creating the `.7z`, the monitor recursively checks every process below the parent workchain. The archive is created only when every checked process has completed successfully (`is_finished_ok`). The presence of an `OUTPUT` file alone is not treated as success.
 
 **`archive_key`** is the auth key sent with archive uploads. Resolution order: `MPDS_ARCHIVE_KEY` environment variable, then `archive_key` from config, then `MPDS_MONITOR_KEY` (the webhook key) as a fallback. This lets archive and webhook endpoints use separate credentials.
 
