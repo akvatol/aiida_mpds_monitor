@@ -1,7 +1,7 @@
 import json
 import shutil
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Iterable, List, Optional
 
 from aiida import load_profile as load_aiida_profile
 from aiida.orm import load_node, WorkChainNode
@@ -20,35 +20,57 @@ LABEL_DICT = {
     "":"ELECTRON",
 }
 
-REQUIRED_OUTPUT_COUNT = 3
 
-
-def validate_archive_contents(archive_root: Path) -> bool:
-    """Validate calculation folders before they are compressed.
-
-    Every immediate calculation-type folder must contain an ``OUTPUT`` file,
-    and there must be exactly three such files in the complete archive tree.
-    """
-    archive_root = Path(archive_root)
-    calculation_dirs = sorted(
-        path for path in archive_root.iterdir() if path.is_dir()
+def _node_description(node: Any) -> str:
+    """Return a concise description of an AiiDA process node."""
+    process_label = getattr(node, "process_label", None) or type(node).__name__
+    identifier = (
+        getattr(node, "pk", None)
+        or getattr(node, "uuid", None)
+        or "unknown"
     )
-    output_files = sorted(
-        path
-        for path in archive_root.rglob("OUTPUT")
-        if path.is_file()
+    process_state = getattr(node, "process_state", None)
+    state = getattr(process_state, "value", process_state)
+    exit_status = getattr(node, "exit_status", None)
+    return (
+        f"{process_label} {identifier} "
+        f"(state={state or 'unknown'}, exit_status={exit_status})"
     )
-    missing_output = [
-        path.name
-        for path in calculation_dirs
-        if not (path / "OUTPUT").is_file()
-    ]
 
-    return not (
-        len(calculation_dirs) != REQUIRED_OUTPUT_COUNT
-        or len(output_files) != REQUIRED_OUTPUT_COUNT
-        or missing_output
-    )
+
+def validate_subnodes_succeeded(nodes: Iterable[Any]) -> bool:
+    """Return ``True`` only when all supplied process nodes and descendants succeeded."""
+    pending = list(nodes)
+    visited = set()
+    unsuccessful = []
+
+    while pending:
+        node = pending.pop()
+        marker = id(node)
+        if marker in visited:
+            continue
+        visited.add(marker)
+
+        if getattr(node, "is_finished_ok", False) is not True:
+            unsuccessful.append(_node_description(node))
+
+        try:
+            pending.extend(list(node.called))
+        except Exception as exc:
+            print(
+                "Archive generation skipped: could not inspect subnodes of "
+                f"{_node_description(node)}: {exc}"
+            )
+            return False
+
+    if unsuccessful:
+        print(
+            "Archive generation skipped because not all subnodes finished "
+            f"successfully: {', '.join(unsuccessful)}"
+        )
+        return False
+
+    return True
 
 
 def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
@@ -92,6 +114,9 @@ def generate_archive(
         calc = load_node(uuid)
     except Exception as e:
         print(f"Failed to load node {uuid}: {e}")
+        return None
+
+    if not validate_subnodes_succeeded([calc]):
         return None
 
     repo_folder = getattr(calc.outputs, "retrieved", None)
@@ -183,11 +208,21 @@ def generate_parent_archive(
         print(f"Failed to load parent node {parent_uuid}: {e}")
         return None
 
+    try:
+        parent_subnodes = list(parent.called)
+    except Exception as exc:
+        print(f"Could not inspect child nodes of parent {parent_uuid}: {exc}")
+        return None
+
     if base_nodes is None:
-        base_nodes = list(parent.called) if hasattr(parent, "called") else []
+        base_nodes = parent_subnodes
 
     if not base_nodes:
         print(f"No child nodes found for parent {parent_uuid}")
+        return None
+
+    nodes_to_validate = parent_subnodes or base_nodes
+    if not validate_subnodes_succeeded(nodes_to_validate):
         return None
 
     if tmp_root is None:
@@ -274,9 +309,6 @@ def generate_parent_archive(
                                 shutil.copyfileobj(src, dst)
                 except Exception:
                     pass
-
-        if not validate_archive_contents(archive_root):
-            return None
 
         if archive_path is None:
             archive_path = tmp_root.parent / f"{parent_dir_name}.7z"
