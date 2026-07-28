@@ -20,6 +20,8 @@ LABEL_DICT = {
     "":"ELECTRON",
 }
 
+REQUIRED_OUTPUT_COUNT = 3
+
 
 def _node_description(node: Any) -> str:
     """Return a concise description of an AiiDA process node."""
@@ -71,6 +73,30 @@ def validate_subnodes_succeeded(nodes: Iterable[Any]) -> bool:
         return False
 
     return True
+
+
+def validate_archive_contents(archive_root: Path) -> bool:
+    """Check that exactly three calculation folders contain one OUTPUT each."""
+    archive_root = Path(archive_root)
+    calculation_dirs = sorted(
+        path for path in archive_root.iterdir() if path.is_dir()
+    )
+    output_files = sorted(
+        path for path in archive_root.rglob("OUTPUT") if path.is_file()
+    )
+    missing_output = [
+        path.name
+        for path in calculation_dirs
+        if not (path / "OUTPUT").is_file()
+    ]
+
+    is_valid = (
+        len(calculation_dirs) == REQUIRED_OUTPUT_COUNT
+        and len(output_files) == REQUIRED_OUTPUT_COUNT
+        and not missing_output
+    )
+
+    return is_valid
 
 
 def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
@@ -309,6 +335,9 @@ def generate_parent_archive(
                                 shutil.copyfileobj(src, dst)
                 except Exception:
                     pass
+
+        if not validate_archive_contents(archive_root):
+            return None
 
         if archive_path is None:
             archive_path = tmp_root.parent / f"{parent_dir_name}.7z"
