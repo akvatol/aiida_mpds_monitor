@@ -19,9 +19,6 @@ LABEL_DICT = {
     "":"ELECTRON",
 }
 
-REQUIRED_OUTPUT_COUNT = 3
-
-
 def _node_marker(node: Any):
     """Return a stable traversal marker for an AiiDA node or test double."""
     node_uuid = getattr(node, "uuid", None)
@@ -88,28 +85,18 @@ def validate_subnodes_succeeded(nodes: Iterable[Any]) -> bool:
 
 
 def validate_archive_contents(archive_root: Path) -> bool:
-    """Check that exactly three calculation folders contain one OUTPUT each.
-
-    Other retrieved-data folders are allowed when they do not contain an
-    additional ``OUTPUT`` file.
-    """
+    """Return ``True`` when at least one non-empty calculation folder exists."""
     archive_root = Path(archive_root)
     calculation_dirs = sorted(
         path for path in archive_root.iterdir() if path.is_dir()
     )
-    output_dirs = [
-        path for path in calculation_dirs if (path / "OUTPUT").is_file()
-    ]
-    output_files = sorted(
-        path for path in archive_root.rglob("OUTPUT") if path.is_file()
-    )
+    if not calculation_dirs:
+        return False
 
-    is_valid = (
-        len(output_dirs) == REQUIRED_OUTPUT_COUNT
-        and len(output_files) == REQUIRED_OUTPUT_COUNT
+    return all(
+        any(path.is_file() for path in calculation_dir.rglob("*"))
+        for calculation_dir in calculation_dirs
     )
-
-    return is_valid
 
 
 def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
