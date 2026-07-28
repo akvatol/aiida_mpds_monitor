@@ -1,7 +1,7 @@
 import json
 import shutil
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Iterable, List, Optional
 
 from aiida import load_profile as load_aiida_profile
 from aiida.orm import load_node, WorkChainNode
@@ -19,6 +19,85 @@ LABEL_DICT = {
     "":"TRANSPORT",
     "":"ELECTRON",
 }
+
+REQUIRED_OUTPUT_COUNT = 3
+
+
+def _node_description(node: Any) -> str:
+    """Return a concise description of an AiiDA process node."""
+    process_label = getattr(node, "process_label", None) or type(node).__name__
+    identifier = (
+        getattr(node, "pk", None)
+        or getattr(node, "uuid", None)
+        or "unknown"
+    )
+    process_state = getattr(node, "process_state", None)
+    state = getattr(process_state, "value", process_state)
+    exit_status = getattr(node, "exit_status", None)
+    return (
+        f"{process_label} {identifier} "
+        f"(state={state or 'unknown'}, exit_status={exit_status})"
+    )
+
+
+def validate_subnodes_succeeded(nodes: Iterable[Any]) -> bool:
+    """Return ``True`` only when all supplied process nodes and descendants succeeded."""
+    pending = list(nodes)
+    visited = set()
+    unsuccessful = []
+
+    while pending:
+        node = pending.pop()
+        marker = id(node)
+        if marker in visited:
+            continue
+        visited.add(marker)
+
+        if getattr(node, "is_finished_ok", False) is not True:
+            unsuccessful.append(_node_description(node))
+
+        try:
+            pending.extend(list(node.called))
+        except Exception as exc:
+            print(
+                "Archive generation skipped: could not inspect subnodes of "
+                f"{_node_description(node)}: {exc}"
+            )
+            return False
+
+    if unsuccessful:
+        print(
+            "Archive generation skipped because not all subnodes finished "
+            f"successfully: {', '.join(unsuccessful)}"
+        )
+        return False
+
+    return True
+
+
+def validate_archive_contents(archive_root: Path) -> bool:
+    """Check that exactly three calculation folders contain one OUTPUT each."""
+    archive_root = Path(archive_root)
+    calculation_dirs = sorted(
+        path for path in archive_root.iterdir() if path.is_dir()
+    )
+    output_files = sorted(
+        path for path in archive_root.rglob("OUTPUT") if path.is_file()
+    )
+    missing_output = [
+        path.name
+        for path in calculation_dirs
+        if not (path / "OUTPUT").is_file()
+    ]
+
+    is_valid = (
+        len(calculation_dirs) == REQUIRED_OUTPUT_COUNT
+        and len(output_files) == REQUIRED_OUTPUT_COUNT
+        and not missing_output
+    )
+
+    return is_valid
+
 
 def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
     """Confirm that archive_and_save created the expected archive and move it if needed.
@@ -61,6 +140,9 @@ def generate_archive(
         calc = load_node(uuid)
     except Exception as e:
         print(f"Failed to load node {uuid}: {e}")
+        return None
+
+    if not validate_subnodes_succeeded([calc]):
         return None
 
     repo_folder = getattr(calc.outputs, "retrieved", None)
@@ -152,11 +234,21 @@ def generate_parent_archive(
         print(f"Failed to load parent node {parent_uuid}: {e}")
         return None
 
+    try:
+        parent_subnodes = list(parent.called)
+    except Exception as exc:
+        print(f"Could not inspect child nodes of parent {parent_uuid}: {exc}")
+        return None
+
     if base_nodes is None:
-        base_nodes = list(parent.called) if hasattr(parent, "called") else []
+        base_nodes = parent_subnodes
 
     if not base_nodes:
         print(f"No child nodes found for parent {parent_uuid}")
+        return None
+
+    nodes_to_validate = parent_subnodes or base_nodes
+    if not validate_subnodes_succeeded(nodes_to_validate):
         return None
 
     if tmp_root is None:
@@ -186,11 +278,10 @@ def generate_parent_archive(
                 if not label or not str(label).strip():
                     continue
 
-                label_ = str(label).strip()
-                label_ = label_.replace("/", "_")
-                if res := re.search(r"\s(\w+\s\w+)\s(?=\[\d\])", label_):
-                    label_ = res.group(1)
-                    label_str = LABEL_DICT.get(label_, label_)
+                label_ = str(label).strip().replace("/", "_")
+                match = re.search(r"\s(\w+\s\w+)\s(?=\[\d+\])", label_)
+                calculation_type = match.group(1) if match else label_
+                label_str = LABEL_DICT.get(calculation_type, calculation_type)
                 grandchild_dir = archive_root / label_str
                 grandchild_dir.mkdir(parents=True, exist_ok=True)
                 try:
@@ -244,6 +335,9 @@ def generate_parent_archive(
                                 shutil.copyfileobj(src, dst)
                 except Exception:
                     pass
+
+        if not validate_archive_contents(archive_root):
+            return None
 
         if archive_path is None:
             archive_path = tmp_root.parent / f"{parent_dir_name}.7z"
