@@ -20,6 +20,37 @@ LABEL_DICT = {
     "":"ELECTRON",
 }
 
+REQUIRED_OUTPUT_COUNT = 3
+
+
+def validate_archive_contents(archive_root: Path) -> bool:
+    """Validate calculation folders before they are compressed.
+
+    Every immediate calculation-type folder must contain an ``OUTPUT`` file,
+    and there must be exactly three such files in the complete archive tree.
+    """
+    archive_root = Path(archive_root)
+    calculation_dirs = sorted(
+        path for path in archive_root.iterdir() if path.is_dir()
+    )
+    output_files = sorted(
+        path
+        for path in archive_root.rglob("OUTPUT")
+        if path.is_file()
+    )
+    missing_output = [
+        path.name
+        for path in calculation_dirs
+        if not (path / "OUTPUT").is_file()
+    ]
+
+    return not (
+        len(calculation_dirs) != REQUIRED_OUTPUT_COUNT
+        or len(output_files) != REQUIRED_OUTPUT_COUNT
+        or missing_output
+    )
+
+
 def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
     """Confirm that archive_and_save created the expected archive and move it if needed.
 
@@ -186,11 +217,10 @@ def generate_parent_archive(
                 if not label or not str(label).strip():
                     continue
 
-                label_ = str(label).strip()
-                label_ = label_.replace("/", "_")
-                if res := re.search(r"\s(\w+\s\w+)\s(?=\[\d\])", label_):
-                    label_ = res.group(1)
-                    label_str = LABEL_DICT.get(label_, label_)
+                label_ = str(label).strip().replace("/", "_")
+                match = re.search(r"\s(\w+\s\w+)\s(?=\[\d+\])", label_)
+                calculation_type = match.group(1) if match else label_
+                label_str = LABEL_DICT.get(calculation_type, calculation_type)
                 grandchild_dir = archive_root / label_str
                 grandchild_dir.mkdir(parents=True, exist_ok=True)
                 try:
@@ -244,6 +274,9 @@ def generate_parent_archive(
                                 shutil.copyfileobj(src, dst)
                 except Exception:
                     pass
+
+        if not validate_archive_contents(archive_root):
+            return None
 
         if archive_path is None:
             archive_path = tmp_root.parent / f"{parent_dir_name}.7z"

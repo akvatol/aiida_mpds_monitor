@@ -1,47 +1,9 @@
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-import py7zr
 import requests
 
 logger = logging.getLogger(__name__)
-
-REQUIRED_OUTPUT_TYPES = frozenset({"STRUCT", "PHONON", "ELASTIC"})
-
-
-def validate_archive_outputs(archive_path: str | Path) -> bool:
-    """Check that an archive has one OUTPUT file for every required calculation type."""
-    archive_path = Path(archive_path)
-
-    try:
-        with py7zr.SevenZipFile(archive_path, mode="r") as archive:
-            output_paths = [
-                PurePosixPath(name)
-                for name in archive.getnames()
-                if PurePosixPath(name).name == "OUTPUT"
-            ]
-    except Exception as exc:
-        logger.error("Could not inspect archive %s: %s", archive_path, exc)
-        return False
-
-    output_types = {
-        path.parts[-2]
-        for path in output_paths
-        if len(path.parts) >= 2
-    }
-    missing_types = REQUIRED_OUTPUT_TYPES - output_types
-
-    if len(output_paths) != len(REQUIRED_OUTPUT_TYPES) or missing_types:
-        logger.error(
-            "Archive %s was not uploaded: expected exactly three OUTPUT files "
-            "(one in each of %s); found %s",
-            archive_path,
-            ", ".join(sorted(REQUIRED_OUTPUT_TYPES)),
-            ", ".join(str(path) for path in output_paths) or "none",
-        )
-        return False
-
-    return True
 
 
 def send_webhook(webhook_url, payload, status, key=None):
@@ -114,9 +76,6 @@ def send_archive(upload_url, archive_path, bid: int | None = None, schema_id: in
     Returns:
         bool: True if upload returned HTTP 200, False otherwise
     """
-    if not validate_archive_outputs(archive_path):
-        return False
-
     data = {}
     if bid is not None:
         data["bid"] = str(bid)

@@ -150,6 +150,8 @@ After sending a webhook, the daemon and CLI build a `.7z` archive and upload it 
 
 **`send_archive`** controls whether the daemon and CLI generate and upload archives at all. Default `true`. Set `false` to skip archive creation and upload entirely (webhooks are still sent).
 
+Before creating the `.7z`, the monitor checks the calculation folders. There must be exactly three folders and each must contain an `OUTPUT` file. Incomplete contents are not compressed or uploaded.
+
 **`archive_key`** is the auth key sent with archive uploads. Resolution order: `MPDS_ARCHIVE_KEY` environment variable, then `archive_key` from config, then `MPDS_MONITOR_KEY` (the webhook key) as a fallback. This lets archive and webhook endpoints use separate credentials.
 
 Copyright © 2026 Materials Platform for Data Science OÜ
