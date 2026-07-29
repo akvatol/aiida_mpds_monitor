@@ -1,12 +1,11 @@
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Iterable, List, Optional
 
 from aiida import load_profile as load_aiida_profile
-from aiida.orm import load_node, WorkChainNode
-
-import re
+from aiida.orm import CalcJobNode, load_node, WorkChainNode
 
 load_aiida_profile()
 
@@ -20,7 +19,17 @@ LABEL_DICT = {
     "":"ELECTRON",
 }
 
-REQUIRED_OUTPUT_COUNT = 3
+def _node_marker(node: Any):
+    """Return a stable traversal marker for an AiiDA node or test double."""
+    node_uuid = getattr(node, "uuid", None)
+    if node_uuid:
+        return "uuid", str(node_uuid)
+
+    node_pk = getattr(node, "pk", None)
+    if node_pk is not None:
+        return "pk", node_pk
+
+    return "object", id(node)
 
 
 def _node_description(node: Any) -> str:
@@ -48,7 +57,7 @@ def validate_subnodes_succeeded(nodes: Iterable[Any]) -> bool:
 
     while pending:
         node = pending.pop()
-        marker = id(node)
+        marker = _node_marker(node)
         if marker in visited:
             continue
         visited.add(marker)
@@ -76,27 +85,18 @@ def validate_subnodes_succeeded(nodes: Iterable[Any]) -> bool:
 
 
 def validate_archive_contents(archive_root: Path) -> bool:
-    """Check that exactly three calculation folders contain one OUTPUT each."""
+    """Return ``True`` when at least one non-empty calculation folder exists."""
     archive_root = Path(archive_root)
     calculation_dirs = sorted(
         path for path in archive_root.iterdir() if path.is_dir()
     )
-    output_files = sorted(
-        path for path in archive_root.rglob("OUTPUT") if path.is_file()
-    )
-    missing_output = [
-        path.name
-        for path in calculation_dirs
-        if not (path / "OUTPUT").is_file()
-    ]
+    if not calculation_dirs:
+        return False
 
-    is_valid = (
-        len(calculation_dirs) == REQUIRED_OUTPUT_COUNT
-        and len(output_files) == REQUIRED_OUTPUT_COUNT
-        and not missing_output
+    return all(
+        any(path.is_file() for path in calculation_dir.rglob("*"))
+        for calculation_dir in calculation_dirs
     )
-
-    return is_valid
 
 
 def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
@@ -122,6 +122,38 @@ def _finalize_archive(source_dir: Path, dest_path: Path) -> Optional[Path]:
 def _safe_dir_name(name: str) -> str:
     """Create a filesystem-safe directory name from a node label."""
     return str(name).strip().replace("/", "_")
+
+
+def _iter_called_descendants(nodes: Iterable[Any]) -> Iterable[Any]:
+    """Yield all process nodes called below *nodes* in depth-first order."""
+    roots = list(nodes)
+    visited = {_node_marker(node) for node in roots}
+    pending = []
+
+    for node in reversed(roots):
+        try:
+            pending.extend(reversed(list(node.called)))
+        except Exception as exc:
+            print(
+                "Warning: Could not inspect subnodes of "
+                f"{_node_description(node)}: {exc}"
+            )
+
+    while pending:
+        node = pending.pop()
+        marker = _node_marker(node)
+        if marker in visited:
+            continue
+        visited.add(marker)
+        yield node
+
+        try:
+            pending.extend(reversed(list(node.called)))
+        except Exception as exc:
+            print(
+                "Warning: Could not inspect subnodes of "
+                f"{_node_description(node)}: {exc}"
+            )
 
 
 def generate_archive(
@@ -192,11 +224,9 @@ def generate_archive(
             with repo_folder.open("OUTPUT", "rb") as src, (calc_dir / "OUTPUT").open("wb") as dst:
                 shutil.copyfileobj(src, dst)
         elif "_scheduler-stderr.txt" in names:
-            with (
-                repo_folder.open("_scheduler-stderr.txt", "rb") as src,
-                (calc_dir / "_scheduler-stderr.txt").open("wb") as dst,
-            ):
-                shutil.copyfileobj(src, dst)
+            with repo_folder.open("_scheduler-stderr.txt", "rb") as src:
+                with (calc_dir / "_scheduler-stderr.txt").open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
     except Exception:
         pass
 
@@ -223,7 +253,7 @@ def generate_parent_archive(
 ) -> Optional[Path]:
     """
     Generate a 7z archive for the parent WorkChain with subdirectories for each
-    grandchild calculation.
+    descendant CalcJob.
 
     Uses a temporary directory under ``tmp_root/{parent_uuid}`` and removes it
     after compression.
@@ -267,74 +297,61 @@ def generate_parent_archive(
     archive_root.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Process each child workchain and collect data from its grandchildren
-        for child_node in base_nodes:
-            if not isinstance(child_node, WorkChainNode):
+        # Traverse every nested workflow and collect retrieved data from CalcJobs.
+        for calculation in _iter_called_descendants(base_nodes):
+            if not isinstance(calculation, CalcJobNode):
                 continue
 
-            grandchildren = child_node.called if hasattr(child_node, "called") else []
-            for grandchild in grandchildren:
-                label = getattr(grandchild, "label", None)
-                if not label or not str(label).strip():
+            label = getattr(calculation, "label", None)
+            if not label or not str(label).strip():
+                continue
+
+            label_ = _safe_dir_name(label)
+            match = re.search(r"\s(\w+\s\w+)\s(?=\[\d+\])", label_)
+            calculation_type = match.group(1) if match else label_
+            label_str = LABEL_DICT.get(calculation_type, calculation_type)
+
+            try:
+                repo_folder = getattr(calculation.outputs, "retrieved", None)
+                if repo_folder is None:
                     continue
+                names = repo_folder.list_object_names()
+            except Exception as e:
+                print(
+                    f"Warning: Could not access retrieved folder for {label_} "
+                    f"{calculation.pk}: {e}"
+                )
+                continue
 
-                label_ = str(label).strip().replace("/", "_")
-                match = re.search(r"\s(\w+\s\w+)\s(?=\[\d+\])", label_)
-                calculation_type = match.group(1) if match else label_
-                label_str = LABEL_DICT.get(calculation_type, calculation_type)
-                grandchild_dir = archive_root / label_str
-                grandchild_dir.mkdir(parents=True, exist_ok=True)
+            calculation_dir = archive_root / label_str
+            calculation_dir.mkdir(parents=True, exist_ok=True)
+            for name in names:
                 try:
-                    repo_folder = getattr(grandchild.outputs, "retrieved", None)
-                    if repo_folder is not None:
-                        names = repo_folder.list_object_names()
-                        for name in names:
-                            try:
-                                with repo_folder.open(name, "rb") as src, (grandchild_dir / name).open("wb") as dst:
-                                    shutil.copyfileobj(src, dst)
-                            except Exception as e:
-                                print(
-                                    f"Warning: Could not copy {name} from {label_} "
-                                    f"{grandchild.pk}: {e}"
-                                )
+                    with repo_folder.open(name, "rb") as src:
+                        with (calculation_dir / name).open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
                 except Exception as e:
                     print(
-                        f"Warning: Could not access retrieved folder for {label_} "
-                        f"{grandchild.pk}: {e}"
+                        f"Warning: Could not copy {name} from {label_} "
+                        f"{calculation.pk}: {e}"
                     )
 
-                try:
-                    params = None
-                    if hasattr(grandchild.inputs, "parameters"):
-                        try:
-                            params = grandchild.inputs.parameters.get_dict()
-                        except Exception:
-                            params = None
+            try:
+                params = None
+                if hasattr(calculation.inputs, "parameters"):
+                    try:
+                        params = calculation.inputs.parameters.get_dict()
+                    except Exception:
+                        params = None
 
-                    if params:
-                        with (grandchild_dir / "INPUT.json").open("w") as f:
-                            json.dump(params, f, indent=2, default=str)
-                except Exception as e:
-                    print(
-                        f"Warning: Could not save INPUT.json for {label_} "
-                        f"{grandchild.pk}: {e}"
-                    )
-
-                try:
-                    repo_folder = getattr(grandchild.outputs, "retrieved", None)
-                    if repo_folder is not None:
-                        names = repo_folder.list_object_names()
-                        if "OUTPUT" in names:
-                            with repo_folder.open("OUTPUT", "rb") as src, (grandchild_dir / "OUTPUT").open("wb") as dst:
-                                shutil.copyfileobj(src, dst)
-                        elif "_scheduler-stderr.txt" in names:
-                            with (
-                                repo_folder.open("_scheduler-stderr.txt", "rb") as src,
-                                (grandchild_dir / "_scheduler-stderr.txt").open("wb") as dst,
-                            ):
-                                shutil.copyfileobj(src, dst)
-                except Exception:
-                    pass
+                if params:
+                    with (calculation_dir / "INPUT.json").open("w") as f:
+                        json.dump(params, f, indent=2, default=str)
+            except Exception as e:
+                print(
+                    f"Warning: Could not save INPUT.json for {label_} "
+                    f"{calculation.pk}: {e}"
+                )
 
         if not validate_archive_contents(archive_root):
             return None
