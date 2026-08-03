@@ -15,8 +15,8 @@ LABEL_DICT = {
     "Elastic constants":"ELASTIC",
     "Phonon frequencies":"PHONON",
     "Geometry optimization":"STRUCT",
-    "":"TRANSPORT",
-    "":"ELECTRON",
+    # "":"TRANSPORT",
+    # "":"ELECTRON",
 }
 
 def _node_marker(node: Any):
