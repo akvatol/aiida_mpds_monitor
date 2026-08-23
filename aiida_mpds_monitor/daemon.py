@@ -229,7 +229,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 all_terminal = False
 
         if not no_commit:
-            parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+            parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
         logger.info(f"Parent {parent_node.pk} marked as processed")
 
 
