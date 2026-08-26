@@ -13,29 +13,26 @@ def send_webhook(webhook_url, payload, status, key=None):
         webhook_url (str): The webhook endpoint URL
         payload (str): The payload data to send
         status (str): The status string
-        key (str, optional): Authorization key for Bearer token authentication
+        key (str, optional): Authorization key included in the form data
 
     Returns:
         bool: True if webhook was sent successfully (200) or already exists on server (409), False otherwise
     """
     data = {"payload": payload, "status": status}
-    headers = {}
     if key:
-        headers["Authorization"] = f"Bearer {key}"
+        data["key"] = key
     try:
-        response = requests.post(
-            webhook_url, data=data, headers=headers or None, timeout=10
-        )
+        response = requests.post(webhook_url, data=data, timeout=10)
         if response.status_code == 200:
             return True
 
-        data["key"] = "***"
+        log_data = {**data, "key": "***"} if key else data
 
         if response.status_code == 409:
             logger.info(
                 "Webhook returned 409 for %s (already exists on server) — marking as done; data=%r",
                 webhook_url,
-                data,
+                log_data,
             )
             return True
 
@@ -44,19 +41,18 @@ def send_webhook(webhook_url, payload, status, key=None):
             "Webhook returned non-200 status %s for %s; data=%r; response=%r",
             response.status_code,
             webhook_url,
-            data,
+            log_data,
             getattr(response, "text", None),
         )
         return False
     except Exception as e:
-
-        data["key"] = "***"
+        log_data = {**data, "key": "***"} if key else data
 
         logger.error(
             "Webhook error: %s (url=%s, data=%r)",
             e,
             webhook_url,
-            data,
+            log_data,
         )
         return False
 
