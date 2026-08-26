@@ -53,11 +53,15 @@ def load_config():
 
 
 def get_auth_key(conf):
-    return conf.get("auth_key") or os.environ.get("MPDS_MONITOR_KEY") or EnvironmentError
+    return (
+        os.environ.get("MPDS_MONITOR_KEY")
+        or conf.get("auth_key")
+        or conf.get("security_key")
+    )
 
 
 def get_archive_key(conf):
-    return conf.get("archive_key") or os.environ.get("MPDS_ARCHIVE_KEY") or get_auth_key()
+    return os.environ.get("MPDS_ARCHIVE_KEY") or conf.get("archive_key") or get_auth_key(conf)
 
 
 def resolve_archive_upload_url(conf, logger):
