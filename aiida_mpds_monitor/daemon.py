@@ -8,6 +8,13 @@ from aiida import load_profile
 from aiida.orm import QueryBuilder, WorkChainNode
 
 from .config import get_archive_key, get_auth_key, load_config, resolve_archive_upload_url
+from .filters import (
+    build_parent_query_filters,
+    count_compound_elements,
+    get_allowed_element_counts,
+    get_time_bounds,
+    matches_element_count,
+)
 from .generate_archive import generate_parent_archive
 from .status import (
     EXTRA_INPROGRESS_SENT,
@@ -16,6 +23,31 @@ from .status import (
     get_node_status,
 )
 from .webhook import send_webhook, send_archive
+
+
+def filter_nodes_by_element_count(nodes, allowed_counts, logger):
+    """Keep nodes whose label formula has one of the configured element counts."""
+    if allowed_counts is None:
+        return nodes
+
+    filtered = []
+    for node in nodes:
+        label = node.label or ""
+        element_count = count_compound_elements(label)
+        if element_count in allowed_counts:
+            filtered.append(node)
+            continue
+
+        count_description = "unrecognized formula" if element_count is None else element_count
+        logger.info(
+            "Skipping %s %s due to element-count filter: label=%r, count=%s, allowed=%s",
+            node.process_label,
+            node.pk,
+            label,
+            count_description,
+            sorted(allowed_counts),
+        )
+    return filtered
 
 
 def setup_logger(config):
@@ -110,13 +142,14 @@ def scan_and_process(config, logger, no_commit=False, force=False):
     # Get parent workchain types from hierarchy keys
     hierarchy = config.get("workchain_hierarchy", {})
     workchain_types = list(hierarchy.keys())
+    allowed_element_counts = get_allowed_element_counts(config)
 
     # Request ALL parent nodes of the specified type that have not yet been processed.
     # Including those that failed!
     qb = QueryBuilder()
     qb.append(
         WorkChainNode,
-        filters={"attributes.process_label": {"in": workchain_types}},
+        filters=build_parent_query_filters(config, workchain_types),
         tag="parent",
     )
 
@@ -132,7 +165,14 @@ def scan_and_process(config, logger, no_commit=False, force=False):
         # Get child workchain types to search for from hierarchy
         parent_label = parent_node.process_label
         child_types = list(hierarchy.get(parent_label, {}).keys())
-        base_nodes = [n for n in called_nodes if isinstance(n, WorkChainNode) and n.process_label in child_types]
+        base_candidates = [
+            node
+            for node in called_nodes
+            if isinstance(node, WorkChainNode) and node.process_label in child_types
+        ]
+        base_nodes = filter_nodes_by_element_count(
+            base_candidates, allowed_element_counts, logger
+        )
 
         if parent_is_broken:
             if force or not parent_node.base.extras.get(EXTRA_PARENT_PROCESSED, False):
@@ -190,10 +230,12 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                 logger.warning(f"Failed to generate archive for failed parent {parent_node.pk}")
                         except Exception as e:
                             logger.exception(f"Error generating archive for failed parent {parent_node.pk}: {e}")
-                else:
+                elif not base_candidates:
                     # Parent failed before spawning any children — report using parent's own label
                     label = parent_node.label
-                    if label and label.strip():
+                    if label and label.strip() and matches_element_count(
+                        label, allowed_element_counts
+                    ):
                         status = get_node_status(parent_node, child_types=[], logger=logger)
                         if send_webhook(webhook_url, label.strip(), status, key=webhook_key):
                             logger.warning(
@@ -202,7 +244,9 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                         else:
                             logger.error(f"Failed to send ERROR webhook for parent '{label}' (no children)")
                     else:
-                        logger.debug(f"Parent {parent_node.pk} failed but has no children and no label — skipping")
+                        logger.debug(
+                            f"Parent {parent_node.pk} failed but its label is empty or excluded — skipping"
+                        )
                 # Mark the parent as processed (if allowed)
                 if not no_commit:
                     parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
@@ -238,11 +282,12 @@ def scan_and_process_dry_run(config, logger, force=False):
     # Get parent workchain types from hierarchy keys
     hierarchy = config.get("workchain_hierarchy", {})
     workchain_types = list(hierarchy.keys())
+    allowed_element_counts = get_allowed_element_counts(config)
 
     qb = QueryBuilder()
     qb.append(
         WorkChainNode,
-        filters={"attributes.process_label": {"in": workchain_types}},
+        filters=build_parent_query_filters(config, workchain_types),
         tag="parent",
     )
     if not force:
@@ -259,20 +304,43 @@ def scan_and_process_dry_run(config, logger, force=False):
         parent_label = parent_node.process_label
         child_types = list(hierarchy.get(parent_label, {}).keys())
 
-        base_nodes = [n for n in called_nodes if isinstance(n, WorkChainNode) and n.process_label in child_types]
+        base_candidates = [
+            node
+            for node in called_nodes
+            if isinstance(node, WorkChainNode) and node.process_label in child_types
+        ]
+        base_nodes = filter_nodes_by_element_count(
+            base_candidates, allowed_element_counts, logger
+        )
 
         if parent_is_broken:
             if base_nodes:
                 for base in base_nodes:
                     label = base.label
-                if not label or not label.strip():
-                    logger.info(f"Skipping {base.pk} — empty label")
-                    continue
-                    # Get grandchild types to check from hierarchy
+                    if not label or not label.strip():
+                        logger.info(f"Skipping {base.pk} — empty label")
+                        continue
                     parent_type = base.process_label
-                    grandchild_types = hierarchy.get(parent_label, {}).get(parent_type, [])
-                    status = get_node_status(base, child_types=grandchild_types, logger=logger)
-                    logger.info(f"[TEST] Would send webhook for '{label}' (status: {status}, parent failed)")
+                    grandchild_types = hierarchy.get(parent_label, {}).get(
+                        parent_type, []
+                    )
+                    status = get_node_status(
+                        base, child_types=grandchild_types, logger=logger
+                    )
+                    logger.info(
+                        f"[TEST] Would send webhook for '{label}' "
+                        f"(status: {status}, parent failed)"
+                    )
+            elif not base_candidates:
+                label = parent_node.label
+                if label and label.strip() and matches_element_count(
+                    label, allowed_element_counts
+                ):
+                    status = get_node_status(parent_node, child_types=[], logger=logger)
+                    logger.info(
+                        f"[TEST] Would send webhook for '{label}' "
+                        f"(status: {status}, parent failed with no children)"
+                    )
             logger.info(f"[TEST] Would mark parent {parent_node.pk} as processed")
             continue
 
@@ -358,6 +426,17 @@ def main():
     logger.info(f"Log file: {config.log_file}")
     hierarchy = config.get("workchain_hierarchy", {})
     logger.info(f"Monitoring workchains: {list(hierarchy.keys())}")
+    try:
+        created_after, created_before = get_time_bounds(config)
+        allowed_element_counts = get_allowed_element_counts(config)
+    except ValueError as exc:
+        parser.error(f"Invalid monitor_filters configuration: {exc}")
+    logger.info(
+        "Monitor filters: created_after=%s, created_before=%s, element_counts=%s",
+        created_after or "any",
+        created_before or "any",
+        sorted(allowed_element_counts) if allowed_element_counts else "any",
+    )
 
     while True:
         try:

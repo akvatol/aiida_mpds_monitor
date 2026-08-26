@@ -25,6 +25,12 @@ DEFAULT_CONFIG = {
     "archive_keep": False,
     "archive_key": "",
     "send_archive": True,
+    "monitor_filters": {
+        "created_after": None,
+        "created_before": None,
+        "max_age_hours": None,
+        "element_counts": [],
+    },
 }
 
 

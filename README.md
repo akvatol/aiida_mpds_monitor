@@ -42,6 +42,20 @@ archive_key: ""
 
 poll_interval: 60
 
+# Optional automatic-monitor filters. Empty values disable each filter.
+monitor_filters:
+  # Parent creation dates in simple YYYY-MM-DD format. The complete first and
+  # last days are included. Full ISO 8601 timestamps are also accepted.
+  created_after: null
+  created_before: null
+  # Rolling alternative to created_after; only parents this many hours old or
+  # newer are scanned. If both are set, the more restrictive bound is used.
+  max_age_hours: null
+  # Filter child labels by distinct elements in their leading formula.
+  # Names and integer counts can be mixed. Named aliases run from unary through
+  # quinary; use an integer for larger counts.
+  element_counts: []
+
 workchain_hierarchy:
   MPDSStructureWorkChain:
     BaseCrystalWorkChain:
@@ -85,6 +99,36 @@ The daemon:
 - Generates a `.7z` archive and uploads it to `archive_upload_url` (skip with `send_archive: false`).
 - Deletes the local archive on successful upload (unless `archive_keep: true`).
 - Marks processed parents to avoid duplicates.
+
+### Filtering monitored workflows
+
+Filters apply to the continuously running `aiida-mpds-monitor` daemon. They do
+not restrict an explicitly requested `aiida-mpds-submit PARENT_PK` operation.
+
+For example, to monitor binary and ternary compounds created since August 1,
+2026:
+
+```yaml
+monitor_filters:
+  created_after: 2026-08-01
+  created_before: 2026-08-31
+  element_counts: [binary, ternary]
+```
+
+For a rolling seven-day window instead:
+
+```yaml
+monitor_filters:
+  max_age_hours: 168
+  element_counts: [2, 3]
+```
+
+The element count is taken from the chemical formula at the beginning of the
+workflow label. For example, `BaPd3P/109: Geometry optimization` is ternary
+(three distinct elements), while `HgI2/137: Geometry optimization` is binary.
+When `element_counts` is enabled, labels without a recognizable leading
+formula are skipped and recorded in the log. Time bounds filter the parent
+workchain's AiiDA `ctime`.
 
 Options:
 
