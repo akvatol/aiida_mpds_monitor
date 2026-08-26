@@ -6,14 +6,6 @@ from typing import Collection, Mapping, Optional, Tuple
 from aiida.common.constants import elements
 
 
-ELEMENT_COUNT_ALIASES = {
-    "unary": 1,
-    "binary": 2,
-    "ternary": 3,
-    "quaternary": 4,
-    "quinary": 5,
-}
-
 _ELEMENT_PATTERN = re.compile(r"[A-Z][a-z]?")
 _FORMULA_REMAINDER_PATTERN = re.compile(r"[\d\s().+\-\[\]·]*")
 _ELEMENT_SYMBOLS = frozenset(
@@ -102,43 +94,27 @@ def get_time_bounds(
 
 
 def get_allowed_element_counts(config) -> Optional[frozenset]:
-    """Return configured element counts, accepting integers and common names."""
+    """Return configured positive integer element counts."""
     raw_counts = _filter_config(config).get("element_counts")
     if raw_counts in (None, "", []):
         return None
-    if isinstance(raw_counts, (str, int)) and not isinstance(raw_counts, bool):
+    if isinstance(raw_counts, int) and not isinstance(raw_counts, bool):
         raw_counts = [raw_counts]
     if (
         not isinstance(raw_counts, Collection)
         or isinstance(raw_counts, (str, bytes, Mapping))
     ):
         raise ValueError(
-            "monitor_filters.element_counts must be a list such as "
-            "[binary, ternary] or [2, 3]"
+            "monitor_filters.element_counts must contain positive integers such as [2, 3]"
         )
 
     normalized = set()
     for value in raw_counts:
-        if isinstance(value, bool):
-            raise ValueError("element counts must be positive integers or names")
-        if isinstance(value, str):
-            normalized_value = ELEMENT_COUNT_ALIASES.get(value.strip().lower())
-            if normalized_value is None:
-                try:
-                    normalized_value = int(value)
-                except ValueError as exc:
-                    raise ValueError(
-                        f"unknown element count {value!r}; use an integer or one of "
-                        f"{', '.join(ELEMENT_COUNT_ALIASES)}"
-                    ) from exc
-        elif isinstance(value, int):
-            normalized_value = value
-        else:
-            raise ValueError("element counts must be positive integers or names")
-
-        if normalized_value <= 0:
+        if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError("element counts must be positive integers")
-        normalized.add(normalized_value)
+        if value <= 0:
+            raise ValueError("element counts must be positive integers")
+        normalized.add(value)
 
     return frozenset(normalized)
 

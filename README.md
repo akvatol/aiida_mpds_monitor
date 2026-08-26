@@ -52,8 +52,7 @@ monitor_filters:
   # newer are scanned. If both are set, the more restrictive bound is used.
   max_age_hours: null
   # Filter child labels by distinct elements in their leading formula.
-  # Names and integer counts can be mixed. Named aliases run from unary through
-  # quinary; use an integer for larger counts.
+  # Use positive integers: 2=binary, 3=ternary, and so on.
   element_counts: []
 
 workchain_hierarchy:
@@ -112,7 +111,7 @@ For example, to monitor binary and ternary compounds created since August 1,
 monitor_filters:
   created_after: 2026-08-01
   created_before: 2026-08-31
-  element_counts: [binary, ternary]
+  element_counts: [2, 3]
 ```
 
 For a rolling seven-day window instead:
