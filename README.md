@@ -54,6 +54,8 @@ monitor_filters:
   # Filter child labels by distinct elements in their leading formula.
   # Use positive integers: 2=binary, 3=ternary, and so on.
   element_counts: []
+  # Optional strict lower bound. 2 accepts compounds with 3 or more elements.
+  element_count_greater_than: null
 
 workchain_hierarchy:
   MPDSStructureWorkChain:
@@ -121,6 +123,17 @@ monitor_filters:
   max_age_hours: 168
   element_counts: [2, 3]
 ```
+
+To send only compounds with more than two distinct elements:
+
+```yaml
+monitor_filters:
+  element_count_greater_than: 2
+```
+
+If `element_counts` and `element_count_greater_than` are both configured, a
+compound must satisfy both filters. For example, `[2, 3, 4]` combined with a
+threshold of `2` accepts only counts `3` and `4`.
 
 The element count is taken from the chemical formula at the beginning of the
 workflow label. For example, `BaPd3P/109: Geometry optimization` is ternary

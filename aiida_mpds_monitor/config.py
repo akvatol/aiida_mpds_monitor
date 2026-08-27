@@ -30,6 +30,7 @@ DEFAULT_CONFIG = {
         "created_before": None,
         "max_age_hours": None,
         "element_counts": [],
+        "element_count_greater_than": None,
     },
 }
 

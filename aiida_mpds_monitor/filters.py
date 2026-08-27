@@ -119,6 +119,18 @@ def get_allowed_element_counts(config) -> Optional[frozenset]:
     return frozenset(normalized)
 
 
+def get_element_count_greater_than(config) -> Optional[int]:
+    """Return the exclusive lower bound configured for element counts."""
+    value = _filter_config(config).get("element_count_greater_than")
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(
+            "monitor_filters.element_count_greater_than must be a non-negative integer"
+        )
+    return value
+
+
 def count_compound_elements(label: str) -> Optional[int]:
     """Count distinct elements in the formula at the start of a workflow label."""
     if not isinstance(label, str) or not label.strip():
@@ -136,11 +148,19 @@ def count_compound_elements(label: str) -> Optional[int]:
     return len(set(symbols))
 
 
-def matches_element_count(label: str, allowed_counts: Optional[Collection[int]]) -> bool:
-    if allowed_counts is None:
+def matches_element_count(
+    label: str,
+    allowed_counts: Optional[Collection[int]] = None,
+    greater_than: Optional[int] = None,
+) -> bool:
+    if allowed_counts is None and greater_than is None:
         return True
     count = count_compound_elements(label)
-    return count is not None and count in allowed_counts
+    if count is None:
+        return False
+    if allowed_counts is not None and count not in allowed_counts:
+        return False
+    return greater_than is None or count > greater_than
 
 
 def build_parent_query_filters(config, workchain_types, now: Optional[datetime] = None):

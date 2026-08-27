@@ -12,6 +12,7 @@ from .filters import (
     build_parent_query_filters,
     count_compound_elements,
     get_allowed_element_counts,
+    get_element_count_greater_than,
     get_time_bounds,
     matches_element_count,
 )
@@ -25,27 +26,31 @@ from .status import (
 from .webhook import send_webhook, send_archive
 
 
-def filter_nodes_by_element_count(nodes, allowed_counts, logger):
-    """Keep nodes whose label formula has one of the configured element counts."""
-    if allowed_counts is None:
+def filter_nodes_by_element_count(
+    nodes, allowed_counts, logger, greater_than=None
+):
+    """Keep nodes whose label formula satisfies the configured count filters."""
+    if allowed_counts is None and greater_than is None:
         return nodes
 
     filtered = []
     for node in nodes:
         label = node.label or ""
         element_count = count_compound_elements(label)
-        if element_count in allowed_counts:
+        if matches_element_count(label, allowed_counts, greater_than):
             filtered.append(node)
             continue
 
         count_description = "unrecognized formula" if element_count is None else element_count
         logger.info(
-            "Skipping %s %s due to element-count filter: label=%r, count=%s, allowed=%s",
+            "Skipping %s %s due to element-count filter: "
+            "label=%r, count=%s, allowed=%s, greater_than=%s",
             node.process_label,
             node.pk,
             label,
             count_description,
-            sorted(allowed_counts),
+            sorted(allowed_counts) if allowed_counts is not None else "any",
+            greater_than if greater_than is not None else "any",
         )
     return filtered
 
@@ -143,6 +148,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
     hierarchy = config.get("workchain_hierarchy", {})
     workchain_types = list(hierarchy.keys())
     allowed_element_counts = get_allowed_element_counts(config)
+    element_count_greater_than = get_element_count_greater_than(config)
 
     # Request ALL parent nodes of the specified type that have not yet been processed.
     # Including those that failed!
@@ -171,7 +177,10 @@ def scan_and_process(config, logger, no_commit=False, force=False):
             if isinstance(node, WorkChainNode) and node.process_label in child_types
         ]
         base_nodes = filter_nodes_by_element_count(
-            base_candidates, allowed_element_counts, logger
+            base_candidates,
+            allowed_element_counts,
+            logger,
+            greater_than=element_count_greater_than,
         )
 
         if parent_is_broken:
@@ -234,7 +243,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                     # Parent failed before spawning any children — report using parent's own label
                     label = parent_node.label
                     if label and label.strip() and matches_element_count(
-                        label, allowed_element_counts
+                        label, allowed_element_counts, element_count_greater_than
                     ):
                         status = get_node_status(parent_node, child_types=[], logger=logger)
                         if send_webhook(webhook_url, label.strip(), status, key=webhook_key):
@@ -283,6 +292,7 @@ def scan_and_process_dry_run(config, logger, force=False):
     hierarchy = config.get("workchain_hierarchy", {})
     workchain_types = list(hierarchy.keys())
     allowed_element_counts = get_allowed_element_counts(config)
+    element_count_greater_than = get_element_count_greater_than(config)
 
     qb = QueryBuilder()
     qb.append(
@@ -310,7 +320,10 @@ def scan_and_process_dry_run(config, logger, force=False):
             if isinstance(node, WorkChainNode) and node.process_label in child_types
         ]
         base_nodes = filter_nodes_by_element_count(
-            base_candidates, allowed_element_counts, logger
+            base_candidates,
+            allowed_element_counts,
+            logger,
+            greater_than=element_count_greater_than,
         )
 
         if parent_is_broken:
@@ -334,7 +347,7 @@ def scan_and_process_dry_run(config, logger, force=False):
             elif not base_candidates:
                 label = parent_node.label
                 if label and label.strip() and matches_element_count(
-                    label, allowed_element_counts
+                    label, allowed_element_counts, element_count_greater_than
                 ):
                     status = get_node_status(parent_node, child_types=[], logger=logger)
                     logger.info(
@@ -429,13 +442,18 @@ def main():
     try:
         created_after, created_before = get_time_bounds(config)
         allowed_element_counts = get_allowed_element_counts(config)
+        element_count_greater_than = get_element_count_greater_than(config)
     except ValueError as exc:
         parser.error(f"Invalid monitor_filters configuration: {exc}")
     logger.info(
-        "Monitor filters: created_after=%s, created_before=%s, element_counts=%s",
+        "Monitor filters: created_after=%s, created_before=%s, "
+        "element_counts=%s, element_count_greater_than=%s",
         created_after or "any",
         created_before or "any",
         sorted(allowed_element_counts) if allowed_element_counts else "any",
+        element_count_greater_than
+        if element_count_greater_than is not None
+        else "any",
     )
 
     while True:
