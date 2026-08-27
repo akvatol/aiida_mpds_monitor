@@ -131,8 +131,8 @@ def get_element_count_greater_than(config) -> Optional[int]:
     return value
 
 
-def count_compound_elements(label: str) -> Optional[int]:
-    """Count distinct elements in the formula at the start of a workflow label."""
+def extract_compound_formula(label: str) -> Optional[str]:
+    """Return a validated formula from the start of a workflow label."""
     if not isinstance(label, str) or not label.strip():
         return None
 
@@ -145,7 +145,73 @@ def count_compound_elements(label: str) -> Optional[int]:
     if not _FORMULA_REMAINDER_PATTERN.fullmatch(remainder):
         return None
 
-    return len(set(symbols))
+    return formula
+
+
+def get_compound_elements(label: str) -> Optional[frozenset]:
+    """Return distinct element symbols from the formula in a workflow label."""
+    formula = extract_compound_formula(label)
+    if formula is None:
+        return None
+    return frozenset(_ELEMENT_PATTERN.findall(formula))
+
+
+def count_compound_elements(label: str) -> Optional[int]:
+    """Count distinct elements in the formula at the start of a workflow label."""
+    compound_elements = get_compound_elements(label)
+    return len(compound_elements) if compound_elements is not None else None
+
+
+def get_allowed_compounds(config) -> Optional[frozenset]:
+    """Return exact compound formulas configured for inclusion."""
+    raw_compounds = _filter_config(config).get("compounds")
+    if raw_compounds in (None, "", []):
+        return None
+    if isinstance(raw_compounds, str):
+        raw_compounds = [raw_compounds]
+    if not isinstance(raw_compounds, Collection) or isinstance(
+        raw_compounds, (bytes, Mapping)
+    ):
+        raise ValueError(
+            "monitor_filters.compounds must contain formulas such as [BaMnO3, HgI2]"
+        )
+
+    normalized = set()
+    for value in raw_compounds:
+        if not isinstance(value, str):
+            raise ValueError("compound filters must be chemical formula strings")
+        value = value.strip()
+        if extract_compound_formula(value) != value:
+            raise ValueError(f"invalid compound formula {value!r}")
+        normalized.add(value)
+    return frozenset(normalized)
+
+
+def get_element_filter(config) -> Tuple[Optional[frozenset], str]:
+    """Return element symbols and their configured any/all matching mode."""
+    options = _filter_config(config)
+    match_mode = str(options.get("elements_match", "any")).strip().lower()
+    if match_mode not in {"any", "all"}:
+        raise ValueError("monitor_filters.elements_match must be 'any' or 'all'")
+
+    raw_elements = options.get("elements")
+    if raw_elements in (None, "", []):
+        return None, match_mode
+    if isinstance(raw_elements, str):
+        raw_elements = [raw_elements]
+    if not isinstance(raw_elements, Collection) or isinstance(
+        raw_elements, (bytes, Mapping)
+    ):
+        raise ValueError(
+            "monitor_filters.elements must contain symbols such as [Ba, Mn]"
+        )
+
+    normalized = set()
+    for value in raw_elements:
+        if not isinstance(value, str) or value.strip() not in _ELEMENT_SYMBOLS:
+            raise ValueError(f"invalid chemical element symbol {value!r}")
+        normalized.add(value.strip())
+    return frozenset(normalized), match_mode
 
 
 def matches_element_count(
@@ -161,6 +227,34 @@ def matches_element_count(
     if allowed_counts is not None and count not in allowed_counts:
         return False
     return greater_than is None or count > greater_than
+
+
+def matches_compound_filters(
+    label: str,
+    allowed_counts: Optional[Collection[int]] = None,
+    greater_than: Optional[int] = None,
+    allowed_compounds: Optional[Collection[str]] = None,
+    selected_elements: Optional[Collection[str]] = None,
+    elements_match: str = "any",
+) -> bool:
+    """Return whether a workflow label satisfies every enabled compound filter."""
+    if not matches_element_count(label, allowed_counts, greater_than):
+        return False
+
+    if allowed_compounds is None and selected_elements is None:
+        return True
+
+    formula = extract_compound_formula(label)
+    compound_elements = get_compound_elements(label)
+    if formula is None or compound_elements is None:
+        return False
+    if allowed_compounds is not None and formula not in allowed_compounds:
+        return False
+    if selected_elements is None:
+        return True
+    if elements_match == "all":
+        return set(selected_elements).issubset(compound_elements)
+    return bool(set(selected_elements).intersection(compound_elements))
 
 
 def build_parent_query_filters(config, workchain_types, now: Optional[datetime] = None):
