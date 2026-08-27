@@ -42,6 +42,27 @@ archive_key: ""
 
 poll_interval: 60
 
+# Optional automatic-monitor filters. Empty values disable each filter.
+monitor_filters:
+  # Parent creation dates in simple YYYY-MM-DD format. The complete first and
+  # last days are included. Full ISO 8601 timestamps are also accepted.
+  created_after: null
+  created_before: null
+  # Rolling alternative to created_after; only parents this many hours old or
+  # newer are scanned. If both are set, the more restrictive bound is used.
+  max_age_hours: null
+  # Filter child labels by distinct elements in their leading formula.
+  # Use positive integers: 2=binary, 3=ternary, and so on.
+  element_counts: []
+  # Optional strict lower bound. 2 accepts compounds with 3 or more elements.
+  element_count_greater_than: null
+  # Optional exact formulas taken from the beginning of workflow labels.
+  compounds: []
+  # Optional element symbols. Match at least one by default, or set
+  # elements_match to "all" to require every listed element.
+  elements: []
+  elements_match: any
+
 workchain_hierarchy:
   MPDSStructureWorkChain:
     BaseCrystalWorkChain:
@@ -85,6 +106,74 @@ The daemon:
 - Generates a `.7z` archive and uploads it to `archive_upload_url` (skip with `send_archive: false`).
 - Deletes the local archive on successful upload (unless `archive_keep: true`).
 - Marks processed parents to avoid duplicates.
+
+### Filtering monitored workflows
+
+Filters apply to the continuously running `aiida-mpds-monitor` daemon. They do
+not restrict an explicitly requested `aiida-mpds-submit PARENT_PK` operation.
+
+For example, to monitor binary and ternary compounds created since August 1,
+2026:
+
+```yaml
+monitor_filters:
+  created_after: 2026-08-01
+  created_before: 2026-08-31
+  element_counts: [2, 3]
+```
+
+For a rolling seven-day window instead:
+
+```yaml
+monitor_filters:
+  max_age_hours: 168
+  element_counts: [2, 3]
+```
+
+To send only compounds with more than two distinct elements:
+
+```yaml
+monitor_filters:
+  element_count_greater_than: 2
+```
+
+If `element_counts` and `element_count_greater_than` are both configured, a
+compound must satisfy both filters. For example, `[2, 3, 4]` combined with a
+threshold of `2` accepts only counts `3` and `4`.
+
+To send only specific compounds:
+
+```yaml
+monitor_filters:
+  compounds: [BaMnO3, HgI2]
+```
+
+To send compounds containing either barium or manganese:
+
+```yaml
+monitor_filters:
+  elements: [Ba, Mn]
+  elements_match: any
+```
+
+To require both elements in every compound:
+
+```yaml
+monitor_filters:
+  elements: [Ba, Mn]
+  elements_match: all
+```
+
+All enabled compound filters are combined with AND. Formula matching is exact
+and case-sensitive: `BaMnO3` matches labels beginning with `BaMnO3`, but not
+`Ba2MnO4`.
+
+The element count is taken from the chemical formula at the beginning of the
+workflow label. For example, `BaPd3P/109: Geometry optimization` is ternary
+(three distinct elements), while `HgI2/137: Geometry optimization` is binary.
+When `element_counts` is enabled, labels without a recognizable leading
+formula are skipped and recorded in the log. Time bounds filter the parent
+workchain's AiiDA `ctime`.
 
 Options:
 

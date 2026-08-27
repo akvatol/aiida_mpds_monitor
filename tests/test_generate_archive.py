@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from aiida_mpds_monitor.generate_archive import generate_parent_archive
 
@@ -14,6 +15,33 @@ class DummyRetrievedFolder:
 
     def open(self, name, mode):
         return open(self._folder_path / name, mode)
+
+
+class DummyProcessNode:
+    def __init__(
+        self,
+        *,
+        uuid,
+        label="",
+        pk=None,
+        called=None,
+        retrieved=None,
+        is_finished_ok=True,
+    ):
+        self.uuid = uuid
+        self.label = label
+        self.pk = pk
+        self.called = list(called or [])
+        self.is_finished_ok = is_finished_ok
+        self.outputs = SimpleNamespace(retrieved=retrieved)
+        self.inputs = SimpleNamespace()
+        self.process_label = type(self).__name__
+        self.process_state = SimpleNamespace(value="finished")
+        self.exit_status = 0 if is_finished_ok else 1
+
+
+class DummyCalcJobNode(DummyProcessNode):
+    pass
 
 
 def _create_retrieved_folder(tmp_path: Path, files):
@@ -39,28 +67,36 @@ def test_generate_parent_archive_creates_named_root(mock_load_node, mock_archive
         parent_uuid = "00000000-0000-0000-0000-000000000000"
         parent_label = "NaCl_225_cF8"
 
-        parent = MagicMock()
-        parent.label = parent_label
-        parent.called = []
+        parent = DummyProcessNode(uuid=parent_uuid, label=parent_label)
         mock_load_node.return_value = parent
 
         # Child workchain with two grandchildren.
-        grandchild_opt = MagicMock()
-        grandchild_opt.label = "OPTIMISE"
-        grandchild_opt.pk = 1
-        grandchild_opt.outputs.retrieved = _create_retrieved_folder(Path(tmp_dir) / "opt_repo", {"OUTPUT": b"opt"})
-
-        grandchild_phon = MagicMock()
-        grandchild_phon.label = "PHON"
-        grandchild_phon.pk = 2
-        grandchild_phon.outputs.retrieved = _create_retrieved_folder(Path(tmp_dir) / "phon_repo", {"OUTPUT": b"phon"})
-
-        child = MagicMock()
-        child.called = [grandchild_opt, grandchild_phon]
-
-        archive_path = generate_parent_archive(
-            parent_uuid, base_nodes=[child], tmp_root=tmp_root
+        grandchild_opt = DummyCalcJobNode(
+            uuid="opt-uuid",
+            label="OPTIMISE",
+            pk=1,
+            retrieved=_create_retrieved_folder(
+                Path(tmp_dir) / "opt_repo", {"OUTPUT": b"opt"}
+            ),
         )
+        grandchild_phon = DummyCalcJobNode(
+            uuid="phon-uuid",
+            label="PHON",
+            pk=2,
+            retrieved=_create_retrieved_folder(
+                Path(tmp_dir) / "phon_repo", {"OUTPUT": b"phon"}
+            ),
+        )
+        child = DummyProcessNode(
+            uuid="child-uuid", called=[grandchild_opt, grandchild_phon]
+        )
+
+        with patch(
+            "aiida_mpds_monitor.generate_archive.CalcJobNode", DummyCalcJobNode
+        ):
+            archive_path = generate_parent_archive(
+                parent_uuid, base_nodes=[child], tmp_root=tmp_root
+            )
 
         assert archive_path is not None
         assert archive_path.name == "NaCl_225_cF8.7z"
@@ -68,5 +104,7 @@ def test_generate_parent_archive_creates_named_root(mock_load_node, mock_archive
         assert archive_path.read_bytes() == b"fake archive"
 
         expected_archive_root = tmp_root / parent_uuid / parent_label
-        mock_archive_and_save.assert_called_once_with(expected_archive_root, aiida=True, skip_errors=True)
+        mock_archive_and_save.assert_called_once_with(
+            expected_archive_root, aiida=True, skip_errors=True
+        )
         assert not (tmp_root / parent_uuid).exists()
