@@ -179,7 +179,8 @@ Options:
 
 - `--dry-run`: Scan and log, skip sends and marks.
 - `--no-commit`: Send webhooks, skip setting AiiDA extras.
-- `--resend-all`: Ignore processed flags and send every eligible webhook.
+- `--resend-all`: Ignore processed flags during the first scan and send every
+  eligible webhook once, then continue in normal monitoring mode.
 - `--logging-level` / `-l`: Set verbosity (DEBUG through CRITICAL; defaults to ERROR).
 
 `--dry-run` and `--no-commit` are mutually exclusive; `--dry-run` wins.

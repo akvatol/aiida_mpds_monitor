@@ -415,6 +415,34 @@ def scan_and_process_dry_run(config, logger, force=False):
         logger.info(f"[TEST] Would mark parent {parent_node.pk} as processed")
 
 
+def run_monitor_loop(config, logger, dry_run=False, no_commit=False, force=False):
+    """Run monitor scans continuously.
+
+    ``force`` applies only to the first completed scan.  This makes
+    ``--resend-all`` a one-shot replay instead of resending the same webhooks
+    after every poll interval.
+    """
+    while True:
+        try:
+            if dry_run:
+                # In test mode, we emulate the behavior without sending
+                scan_and_process_dry_run(config, logger, force=force)
+            else:
+                scan_and_process(config, logger, no_commit=no_commit, force=force)
+
+            if force:
+                force = False
+                logger.info(
+                    "Forced resend scan completed; continuing in normal monitor mode"
+                )
+        except KeyboardInterrupt:
+            logger.info("Shutting down gracefully...")
+            break
+        except Exception as e:
+            logger.exception(f"Unexpected error: {e}")
+        time.sleep(config.poll_interval)
+
+
 def main():
     import argparse
 
@@ -432,7 +460,10 @@ def main():
     parser.add_argument(
         "--resend-all",
         action="store_true",
-        help="Ignore existing extras/markers and resend webhooks for every eligible workchain.",
+        help=(
+            "Ignore existing extras/markers during the first scan and resend "
+            "webhooks for every eligible workchain."
+        ),
     )
     parser.add_argument(
         "--logging-level",
@@ -506,16 +537,10 @@ def main():
         elements_match,
     )
 
-    while True:
-        try:
-            if dry_run:
-                # In test mode, we emulate the behavior without sending
-                scan_and_process_dry_run(config, logger, force=force)
-            else:
-                scan_and_process(config, logger, no_commit=no_commit, force=force)
-        except KeyboardInterrupt:
-            logger.info("Shutting down gracefully...")
-            break
-        except Exception as e:
-            logger.exception(f"Unexpected error: {e}")
-        time.sleep(config.poll_interval)
+    run_monitor_loop(
+        config,
+        logger,
+        dry_run=dry_run,
+        no_commit=no_commit,
+        force=force,
+    )
