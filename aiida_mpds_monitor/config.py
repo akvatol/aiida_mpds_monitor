@@ -25,6 +25,7 @@ DEFAULT_CONFIG = {
     "archive_keep": False,
     "archive_key": "",
     "send_archive": True,
+    "send_archives_all_stages_ready": False,
     "monitor_filters": {
         "created_after": None,
         "created_before": None,

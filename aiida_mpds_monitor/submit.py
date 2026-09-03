@@ -8,6 +8,7 @@ from aiida.orm import WorkChainNode, load_node
 from .config import get_archive_key, get_auth_key, load_config, resolve_archive_upload_url
 from .generate_archive import generate_parent_archive
 from .status import (
+    base_has_ready_children,
     get_node_status,
 )
 from .webhook import send_webhook, send_archive
@@ -126,8 +127,28 @@ def submit_parent(
 
     # Create parent archive with all child results
     if not dry_run and config and config.get("send_archive", True):
+        archive_base_nodes = [
+            base
+            for base in base_nodes
+            if base_has_ready_children(
+                base,
+                child_types=hierarchy.get(parent_label, {}).get(base.process_label, []),
+                all_stages_ready=config.get("send_archives_all_stages_ready", False),
+            )
+        ]
+        all_stages_ready = config.get("send_archives_all_stages_ready", False)
+        archive_ready = bool(archive_base_nodes) and (
+            all_stages_ready and len(archive_base_nodes) == len(base_nodes)
+            or not all_stages_ready
+        )
+        if not archive_ready:
+            return
         print(f"Generating parent archive for {parent_pk}...")
-        archive_path = generate_parent_archive(parent_node.uuid, base_nodes=base_nodes)
+        archive_path = generate_parent_archive(
+            parent_node.uuid,
+            base_nodes=archive_base_nodes,
+            require_all_subnodes=all_stages_ready,
+        )
         if archive_path:
             print(f"Parent archive successfully created: {archive_path}")
             try:

@@ -250,6 +250,7 @@ def generate_parent_archive(
     base_nodes: Optional[List[WorkChainNode]] = None,
     archive_path: Optional[Path] = None,
     tmp_root: Optional[Path] = None,
+    require_all_subnodes: bool = True,
 ) -> Optional[Path]:
     """
     Generate a 7z archive for the parent WorkChain with subdirectories for each
@@ -277,8 +278,8 @@ def generate_parent_archive(
         print(f"No child nodes found for parent {parent_uuid}")
         return None
 
-    nodes_to_validate = parent_subnodes or base_nodes
-    if not validate_subnodes_succeeded(nodes_to_validate):
+    nodes_to_validate = base_nodes
+    if require_all_subnodes and not validate_subnodes_succeeded(nodes_to_validate):
         return None
 
     if tmp_root is None:
@@ -300,6 +301,12 @@ def generate_parent_archive(
         # Traverse every nested workflow and collect retrieved data from CalcJobs.
         for calculation in _iter_called_descendants(base_nodes):
             if not isinstance(calculation, CalcJobNode):
+                continue
+
+            if (
+                not require_all_subnodes
+                and getattr(calculation, "is_finished_ok", False) is not True
+            ):
                 continue
 
             label = getattr(calculation, "label", None)

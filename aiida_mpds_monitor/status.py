@@ -43,6 +43,34 @@ def check_child_calculation(base_node, child_types=None, logger=None):
         return False
 
 
+def get_child_calculations(base_node, child_types=None):
+    """Return direct child calculations matching the configured process labels."""
+    if child_types is None:
+        child_types = ["CrystalParallelCalculation"]
+    try:
+        return [
+            node
+            for node in base_node.called
+            if hasattr(node, "process_label") and node.process_label in child_types
+        ]
+    except Exception:
+        return []
+
+
+def base_has_ready_children(base_node, child_types=None, all_stages_ready=False):
+    """Return whether a base structure has enough successful child calculations."""
+    child_calcs = get_child_calculations(base_node, child_types)
+    if not child_calcs:
+        return False
+
+    successful = [
+        calc for calc in child_calcs if getattr(calc, "is_finished_ok", False) is True
+    ]
+    if all_stages_ready:
+        return len(successful) == len(child_calcs)
+    return bool(successful)
+
+
 def get_node_status(node, child_types=None, logger=None):
     """Determine the status of an AiiDA node."""
     if child_types is None:

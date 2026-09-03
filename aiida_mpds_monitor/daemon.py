@@ -20,6 +20,7 @@ from .filters import (
 )
 from .generate_archive import generate_parent_archive
 from .status import (
+    base_has_ready_children,
     EXTRA_INPROGRESS_SENT,
     EXTRA_PARENT_PROCESSED,
     STATUS_WAITING,
@@ -118,6 +119,7 @@ def generate_and_upload_archive(parent_node, base_nodes, config, logger) -> bool
         archive_path = generate_parent_archive(
             parent_node.uuid,
             base_nodes=base_nodes,
+            require_all_subnodes=config.get("send_archives_all_stages_ready", False),
         )
     except Exception as exc:
         logger.exception(
@@ -271,6 +273,15 @@ def scan_and_process(config, logger, no_commit=False, force=False):
             selected_elements=selected_elements,
             elements_match=elements_match,
         )
+        archive_base_nodes = [
+            base
+            for base in base_nodes
+            if base_has_ready_children(
+                base,
+                child_types=hierarchy.get(parent_label, {}).get(base.process_label, []),
+                all_stages_ready=config.get("send_archives_all_stages_ready", False),
+            )
+        ]
 
         if parent_is_broken:
             if force or not parent_node.base.extras.get(EXTRA_PARENT_PROCESSED, False):
@@ -355,11 +366,16 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                 all_terminal = False
 
         processing_complete = bool(base_nodes) and all_terminal and not any_failed
+        archive_ready = bool(archive_base_nodes) and (
+            config.get("send_archives_all_stages_ready", False)
+            and len(archive_base_nodes) == len(base_nodes)
+            or not config.get("send_archives_all_stages_ready", False)
+        )
         archive_uploaded = False
-        if processing_complete:
+        if processing_complete and archive_ready:
             archive_uploaded = generate_and_upload_archive(
                 parent_node,
-                base_nodes,
+                archive_base_nodes,
                 config,
                 logger,
             )
