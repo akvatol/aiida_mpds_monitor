@@ -39,6 +39,7 @@ archive_key: ""
 
 # Disable archive generation and upload entirely (default: true)
 # send_archive: false
+# send_archives_all_stages_ready: false
 
 poll_interval: 60
 
@@ -240,7 +241,11 @@ After sending a webhook, the daemon and CLI build a `.7z` archive and upload it 
 
 **`send_archive`** controls whether the daemon and CLI generate and upload archives at all. Default `true`. Set `false` to skip archive creation and upload entirely (webhooks are still sent).
 
-Before creating the `.7z`, the monitor applies both checks: every process below the parent workchain must have completed successfully (`is_finished_ok`), and the collected contents must contain at least one non-empty calculation folder. The number of calculation folders and their filenames are workflow-dependent. Failing either check prevents archive creation and upload.
+**`send_archives_all_stages_ready`** controls archive readiness. Default `false`:
+a structure is included when at least one configured subcalculation succeeds.
+Set `true` to include structures only after all configured subcalculations succeed.
+
+Before creating the `.7z`, the monitor checks that the collected contents contain at least one non-empty calculation folder. With `send_archives_all_stages_ready: true`, every process below the selected base workchains must also have completed successfully (`is_finished_ok`). The number of calculation folders and their filenames are workflow-dependent. Failing an applicable check prevents archive creation and upload.
 
 **`archive_key`** is the auth key sent with archive uploads. Resolution order: `MPDS_ARCHIVE_KEY` environment variable, then `archive_key` from config, then `MPDS_MONITOR_KEY` (the webhook key) as a fallback. This lets archive and webhook endpoints use separate credentials.
 
