@@ -21,6 +21,7 @@ from .filters import (
 from .generate_archive import generate_parent_archive
 from .status import (
     base_has_ready_children,
+    EXTRA_ARCHIVE_PROCESSED,
     EXTRA_INPROGRESS_SENT,
     EXTRA_PARENT_PROCESSED,
     STATUS_WAITING,
@@ -179,9 +180,9 @@ def process_base_workchain(
 ):
     """Handle one base workchain node.
 
-    When ``force`` is True we ignore any ``EXTRA_PARENT_PROCESSED`` flag and always
-    attempt to send a webhook.  This is used by the ``--resend-all`` CLI
-    option to re‑deliver hooks regardless of previous marks.
+    ``force`` makes the parent eligible for a scan, but successful per-node
+    delivery marks are still respected.  This lets ``--resend-all`` retry only
+    deliveries that were not completed previously.
     """
     label = base_node.label
     if not label or not label.strip():
@@ -197,10 +198,6 @@ def process_base_workchain(
     already_finished = base_node.base.extras.get(EXTRA_PARENT_PROCESSED, False)
 
     inprogress_sent = base_node.base.extras.get(EXTRA_INPROGRESS_SENT, False)
-    if force:
-        already_finished = False
-        inprogress_sent = False
-
     if not already_finished:
         status = get_node_status(base_node, child_types=grandchild_types, logger=logger)
 
@@ -286,10 +283,13 @@ def scan_and_process(config, logger, no_commit=False, force=False):
         if parent_is_broken:
             if force or not parent_node.base.extras.get(EXTRA_PARENT_PROCESSED, False):
                 if base_nodes:
+                    all_webhooks_sent = True
                     # If parent is broken, send actual status for each base workchain
                     for base in base_nodes:
                         label = base.label
                         if label and label.strip():
+                            if base.base.extras.get(EXTRA_PARENT_PROCESSED, False):
+                                continue
                             # Get grandchild types to check from hierarchy
                             parent_type = base.process_label
                             grandchild_types = hierarchy.get(parent_label, {}).get(parent_type, [])
@@ -309,17 +309,28 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                                     f"ERROR webhook sent for subtask '{label}' (status: {status}, parent {parent_node.pk} failed)"
                                 )
                                 if not no_commit:
-                                    parent_node.set_extra(EXTRA_PARENT_PROCESSED, True)
+                                    base.base.extras.set(EXTRA_PARENT_PROCESSED, True)
                             else:
+                                all_webhooks_sent = False
                                 logger.error(f"Failed to send ERROR webhook for '{label}'")
-                    generate_and_upload_archive(
-                        parent_node,
-                        base_nodes,
-                        config,
-                        logger,
+                    archive_uploaded = parent_node.base.extras.get(
+                        EXTRA_ARCHIVE_PROCESSED, False
                     )
+                    if all_webhooks_sent and not archive_uploaded:
+                        archive_uploaded = generate_and_upload_archive(
+                            parent_node,
+                            base_nodes,
+                            config,
+                            logger,
+                        )
+                    if all_webhooks_sent and archive_uploaded and not no_commit:
+                        parent_node.base.extras.set(EXTRA_ARCHIVE_PROCESSED, True)
+                        parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
                 elif not base_candidates:
                     # Parent failed before spawning any children — report using parent's own label
+                    webhook_sent = parent_node.base.extras.get(
+                        EXTRA_PARENT_PROCESSED, False
+                    )
                     label = parent_node.label
                     if label and label.strip() and matches_compound_filters(
                         label,
@@ -334,15 +345,17 @@ def scan_and_process(config, logger, no_commit=False, force=False):
                             logger.warning(
                                 f"ERROR webhook sent for parent '{label}' (status: {status}, no children spawned)"
                             )
+                            webhook_sent = True
                         else:
                             logger.error(f"Failed to send ERROR webhook for parent '{label}' (no children)")
                     else:
                         logger.debug(
                             f"Parent {parent_node.pk} failed but its label is empty or excluded — skipping"
                         )
-                # Mark the parent as processed (if allowed)
-                if not no_commit:
-                    parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
+                    # No archive is applicable when the parent spawned no children.
+                    if webhook_sent and not no_commit:
+                        parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
+                        parent_node.base.extras.set(EXTRA_ARCHIVE_PROCESSED, True)
                 continue
 
         # Normal processing
@@ -371,8 +384,10 @@ def scan_and_process(config, logger, no_commit=False, force=False):
             and len(archive_base_nodes) == len(base_nodes)
             or not config.get("send_archives_all_stages_ready", False)
         )
-        archive_uploaded = False
-        if processing_complete and archive_ready:
+        archive_uploaded = parent_node.base.extras.get(
+            EXTRA_ARCHIVE_PROCESSED, False
+        )
+        if processing_complete and archive_ready and not archive_uploaded:
             archive_uploaded = generate_and_upload_archive(
                 parent_node,
                 archive_base_nodes,
@@ -382,6 +397,7 @@ def scan_and_process(config, logger, no_commit=False, force=False):
 
         if processing_complete and archive_uploaded:
             if not no_commit:
+                parent_node.base.extras.set(EXTRA_ARCHIVE_PROCESSED, True)
                 parent_node.base.extras.set(EXTRA_PARENT_PROCESSED, True)
                 logger.info(f"Parent {parent_node.pk} marked as processed")
         else:
